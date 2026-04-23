@@ -1,0 +1,35 @@
+[
+  {
+    "name": "김민준",
+    "goal": "AI",
+    "skill" : ["python" ,"fastapi" ,"java"],
+    "experience": [
+      "FastAPI 기반 챗봇 서버 구현 및 KoBERT 모델 연동",
+      "사용자 질문 로그 수집 후 간단한 intent 분류 모델 개선",
+      "프로젝트 배포를 위해 Docker로 컨테이너 구성"
+    ],
+    "collaboration": 3
+  },
+  {
+    "name": "이서연",
+    "goal": "Frontend",
+    "skills": ["html","css","js"],
+    "experience": [
+      "React로 포트폴리오 웹사이트 제작 및 반응형 UI 구현",
+      "쇼핑몰 메인 페이지 클론코딩 및 상태관리(Context API) 적용",
+      "Figma로 UI 설계 후 실제 코드로 구현"
+    ],
+    "collaboration": 4
+  },
+  {
+    "name": "김성현",
+    "goal": "AI",
+    "skill" : ["python" ,"pandas" ,"matplotlib"],
+    "experience": [
+      "python for문 까지 구현",
+      "pandas maplotlib 라이브러리로 타이타닉 데이터 시각화"
+    ],
+    "collaboration": 1
+  }
+
+]
