@@ -22,6 +22,8 @@ from typing import Literal
 
 #apikey 다시파야할듯.
 #클로드코드, codex한번 사서 써봐야할듯.
+
+#지금 매칭로직에서 score들이 되게 중요함 그래서 score들 점수를 잘 매겨야할듯. 상중하도 
 def get_llm(model = "solar-pro3"):
     llm = ChatUpstage(model = model, temperature=0.05) #모델 랜덤성이 좀 있길레 temperature=0으로 해줌
     return llm
