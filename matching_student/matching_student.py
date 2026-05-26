@@ -21,10 +21,11 @@ SKILL_LEVEL_SCORE = {
 
 
 def load_analysis_output_json():
-    #json파일 경로로 파일 가져와서 result에 넣음.
-    with open(ANALYSIS_OUTPUT_PATH, "r", encoding="utf-8") as f:
-        results = json.load(f)
+    with open(ANALYSIS_OUTPUT_PATH,'r',encoding='utf-8') as f: #r은 읽기모드로 열겠다는 뜻이고 ,as f는 f라는 변수로 받겠다는거임. 
+    #with은 작업끝나면 알아서 닫아주는 걸 해주는 거라고 생각하면 됨.
+        results = json.load(f) #f가 가리키는 json으로 읽고 dict이나 list로 변환해서 results에 저장
     return results
+
 
 
 def get_llm(model="solar-pro3"):
@@ -42,7 +43,7 @@ def get_prompt_chain():
 - 각 팀의 전체 실력 합계가 너무 차이 나지 않게 한다.
 - 가능하면 프론트엔드, 백엔드, AI/데이터, 기타 역할이 한 팀에 몰리지 않게 한다.
 - 낮음 학생은 보통 또는 높음 학생과 함께 배치한다.
-- 같은 역할만 모인 팀은 피한다.
+- 같은 역할만 모인 팀은 피한다. 
 - 아직 선호 팀원, 팀장 선호도 데이터는 없으므로 실력/역할 균형을 우선한다.
 
 이름 사용 규칙:
@@ -85,19 +86,27 @@ initial_teams:
 def parse_stack_score(stack_score):
     # stack_score는 "python: 7점\nfastapi: 7점" 같은 문자열이라
     # 정규식으로 숫자만 뽑아서 평균 점수를 계산한다.
-    scores = [int(score) for score in re.findall(r"(\d{1,2})점", stack_score or "")]
+    scores = [int(score) for score in re.findall(r"(\d{1,2})점", stack_score or "")] 
+    #re.findall 정규표현식, 패턴에 맞는문자열들 찾아서 리스트로 반환 for문 돌려서 score에 문자열 넣어주고 그 score들 int로 변환
     if not scores:
         return 0
-    return sum(scores) / len(scores)
+    return sum(scores) / len(scores) #합계랑 score개수랑 나누어줌.
+
+
 
 
 def get_student_score(student):
     # 학생의 전체 실력 점수.
     # skill_level을 큰 기준으로 보고, stack_score 평균을 보조 점수로 더한다.
     # 예: 보통(2 * 10) + 스택 평균 5점 = 25점
-    level_score = SKILL_LEVEL_SCORE.get(student.get("skill_level"), 1)
-    stack_score = parse_stack_score(student.get("stack_score", ""))
+    level_score = SKILL_LEVEL_SCORE.get(student.get("skill_level"),1)
+    #student에 skill_level value값을 위에서 정한 skill level을 숫자로 바꿔주는 그거 사용해서 value받은거에 SKILL_LEVEL_SCORE에 value값을 들고옴 없으면 기본값 1 있으면 그값
+    stack_score = parse_stack_score(student.get("stack_score",""))
+    #stack_score가져와서 함수써서 숫자만 추출함 없으면 빈 문자열.
     return level_score * 10 + stack_score
+    #level_score를 *10해주고 보조 점수로 stack_score 더해줌.
+
+
 
 
 def get_role_group(role):
@@ -105,8 +114,10 @@ def get_role_group(role):
     # 키워드 기준으로 큰 역할군(frontend/backend/ai_data/game/etc)으로 묶는다.
     # 이 값은 같은 역할이 한 팀에 몰리는 것을 줄이는 데 사용한다.
     role_text = (role or "").lower()
-
-    if any(keyword in role_text for keyword in ["frontend", "front", "프론트"]):
+    #역할 데이터 가져와서 소문자로 바꿔줌 없으면 빈문자열
+    #테스트하다가 여기 문제 생기는거 장담못함.
+    if any(keyword in role_text for keyword in ["frontend", "front", "프론트"]): 
+    #for문 돌면서 keyword안에 리스트 넣고 키워드랑 role text랑 any 써서 하나라도 맞는게 있으면 return
         return "frontend"
     if any(keyword in role_text for keyword in ["backend", "back", "서버", "server", "백엔드"]):
         return "backend"
@@ -130,13 +141,15 @@ def make_student_summary(student):
         "weakness": student.get("weakness"),
     }
 
+    #suggestion은 왜 안보는지 모르겠음 기껏만들었더니. 보도록 만들어야할듯.
+
 
 def get_student_names(students):
     # LLM이 이름을 바꾸는 문제를 막기 위해 원본 이름 목록을 따로 만든다.
     # 프롬프트에 이 목록을 넘기고, 응답 후에도 누락된 이름이 있는지 검사한다.
     return [student.get("name") for student in students if student.get("name")]
 
-
+#여기서 부터
 def make_empty_teams(team_count):
     # 팀 배정을 시작하기 전 빈 팀 틀을 만든다.
     # members에는 학생이 들어가고, total_score는 팀 실력 합계,
@@ -166,9 +179,9 @@ def choose_team_for_student(teams, student, max_team_size):
     return min(
         available_teams,
         key=lambda team: (
-            team["total_score"],
-            team["role_groups"].get(role_group, 0),
-            len(team["members"]),
+            team["total_score"], #팀 전체적인 총합 점수
+            team["role_groups"].get(role_group, 0), #팀에 전체적인 역할 인원
+            len(team["members"]), #팀 인원
         ),
     )
 
@@ -253,7 +266,7 @@ def get_response(team_size=4, team_count=None, use_ai=True, retry_on_invalid_nam
     results = load_analysis_output_json()
     allowed_student_names = get_student_names(results)
     initial_teams = create_initial_teams(
-        results,
+        results, #여기서 results넣어서 create_initial함수로 들어가게 됨
         team_size=team_size,
         team_count=team_count,
     )
@@ -333,3 +346,6 @@ if __name__ == "__main__":
 # 게임팀은 설문조사 답변을 반영하여 선호팀원과 팀을 생성할게요
 
 # 기술적으로 이끌어 갈 사람과 참여할 의욕이 있는 학생을 포함되게 팀을 생성할게요
+
+#지금 매칭 나름 잘나오는거 같은데 이렇게 하면 점수로만 균형잡힌 팀을 판별함. 그래서 팀에 개연성이 없음 게임이랑 ai랑 엮여서 팀에 문제가 생길수 있음
+#그리고 팀장하고 선호팀원 받아야함.

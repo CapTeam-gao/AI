@@ -23,7 +23,7 @@ from typing import Literal
 #apikey 다시파야할듯.
 #클로드코드, codex한번 사서 써봐야할듯.
 def get_llm(model = "solar-pro3"):
-    llm = ChatUpstage(model = model, temperature=0) #모델 랜덤성이 좀 있길레 temperature=0으로 해줌
+    llm = ChatUpstage(model = model, temperature=0.05) #모델 랜덤성이 좀 있길레 temperature=0으로 해줌
     return llm
 
 
@@ -344,7 +344,10 @@ def get_analyze_stu():
 
     return results
 
-results = get_analyze_stu()
+results = None
 
-#structured output사용해서 출력 구조 조정해주기
-#분석하면 잘나올때도 있고 못나올때도 있음 출력 기준이 계속 다른듯 이걸 좀 어떻게 해야할듯.
+if __name__ == "__main__":
+    results = get_analyze_stu()
+
+#팀장선호와 원하는팀원을 받아야하는데 이걸 어떻게 받을지 정해야함. 원하는팀원은 몇명받을건지 팀장선호수가 넘치면 어떻게 할건지.
+#스택으로 점수를 부여하는것을 좀 해야할듯 지금 허재원 react실력이 박건욱 html실력이랑 비슷하다고 해서 점수가 비슷함 이부분을 해결할수있도록 만들어야할듯
