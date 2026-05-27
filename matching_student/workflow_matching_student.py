@@ -7,7 +7,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 load_dotenv()
-
+#역할을 다양하게 균형 잡힌 팀 1순위 , 선호팀원 2순위 
 def get_llm(model = 'gpt-5-nano'):
     return init_chat_model(model = model)
 
@@ -36,8 +36,6 @@ SKILL_LEVEL_SCORE = {
     "보통": 2,
     "낮음": 1,
 }
-
-
 
 
 
@@ -205,6 +203,7 @@ class TeamMatchingResult(BaseModel):
     validation_notes: str = Field(description="매칭 기준 검증 메모")
 
 
+
 def get_matching_prompt_chain():
     system_prompt = """
 당신은 캡스톤 프로젝트 팀 매칭을 보정하는 전문가다.
@@ -325,57 +324,59 @@ def create_team_node(state: MatchingState) -> Dict[str, Any]:
 #밸런스 검사 노드
 #llm_result 또는 teams를 가져와서 전체 평가 결과는 balance_result에,
 #팀별 평가 결과는 team_evaluations에 저장한다.
-
+#이 알고리즘이 위에 llm이 팀 생성한 것을 다시 알고리즘으로 잘했는지 검증함
 def get_candidate_teams(candidate_result):
     # structured output 결과는 {"final_teams": [...]} 형태이고,
     # 알고리즘 초안은 바로 팀 리스트 형태라서 둘 다 받을 수 있게 정리한다.
-    if isinstance(candidate_result, dict):
-        return candidate_result.get("final_teams", [])
+    if isinstance(candidate_result, dict): #candidate_result가 dict인지 확인
+        return candidate_result.get("final_teams", []) #candidate_result 딕셔너리에서 "final_teams" 키의 value 값을 가져오고,없으면 [] 반환
     if isinstance(candidate_result, list):
-        return candidate_result
-    return []
+        return candidate_result #list면 그냥 반환.
+    return [] #둘다 아니면 빈 리스트
+
 
 
 def get_member_names(team):
     # 알고리즘 초안의 members는 dict 리스트, LLM 결과의 members는 이름 문자열 리스트다.
     # 검증에서는 이름만 필요하므로 같은 형태로 맞춘다.
-    member_names = []
-    for member in team.get("members", []):
-        if isinstance(member, dict):
-            member_names.append(member.get("name"))
+    member_names = [] #팀원 즉 사람이름을 넣어서 검증할 리스트
+    for member in team.get("members", []): #member에 value가져와서 member로 순회
+        if isinstance(member, dict): #member가 dict이면  isinstance는 객체가 어떤 타입인지 확인하는 함수.
+            member_names.append(member.get("name")) #member에 name key에 value받아서 member_name 리스트에 추가.
         else:
-            member_names.append(member)
-    return [name for name in member_names if name]
+            member_names.append(member) #만약 dict형태로 저장 되있지 않으면 그냥 member를 리스트에 추가 
+    return [name for name in member_names if name] #member_name을 순회해서 name에 넣은 다음 name에 빈값없으면추가
 
 
 def build_student_lookup(analyzed_students):
     # 학생 이름으로 score, skill_level, role_group을 빠르게 찾기 위한 dict.
     return {
-        student.get("name"): make_student_summary(student)
-        for student in analyzed_students
-        if student.get("name")
+        student.get("name"): make_student_summary(student) #key : value로 저장
+        for student in analyzed_students #학생들을 하나씩 순회.
+        if student.get("name") #이름 없는 학생들 제외
     }
 
 
 def calculate_team_status(team, student_lookup):
     # 팀원 이름 목록을 기준으로 실제 총점과 역할 분포를 다시 계산한다.
-    member_names = get_member_names(team)
-    total_score = 0
-    role_groups = {}
-    skill_levels = {}
-    unknown_names = []
+    member_names = get_member_names(team) #이름 가져와서 member_names에 저장
+    total_score = 0 #팀 총점
+    role_groups = {} #역할군 분포
+    skill_levels = {} #실력 레벨 분포
+    unknown_names = [] #분석 데이터에 없는이름
 
-    for name in member_names:
+    #팀원이름 검사
+    for name in member_names: 
         student = student_lookup.get(name)
         if student is None:
             unknown_names.append(name)
             continue
 
-        total_score += student["score"]
-        role_group = student["role_group"]
-        skill_level = student["skill_level"]
-        role_groups[role_group] = role_groups.get(role_group, 0) + 1
-        skill_levels[skill_level] = skill_levels.get(skill_level, 0) + 1
+        total_score += student["score"] #for문 돌면서 점수 더함.
+        role_group = student["role_group"] #역할 넣어주기
+        skill_level = student["skill_level"] 
+        role_groups[role_group] = role_groups.get(role_group, 0) + 1 #총 팀 역할 더해주기
+        skill_levels[skill_level] = skill_levels.get(skill_level, 0) + 1 
 
     return {
         "team_name": team.get("team_name"),
@@ -391,13 +392,13 @@ def calculate_team_status(team, student_lookup):
 def validation_balance_team(candidate_result, analyzed_students, base_teams=None):
     # 알고리즘으로 팀 검증하여 수정할 필요가 있는지 없는지 판단한다.
     # 여기서는 LLM을 쓰지 않고, 이름/중복/누락/점수/인원/역할 분포를 코드로 검사한다.
-    candidate_teams = get_candidate_teams(candidate_result)
-    student_lookup = build_student_lookup(analyzed_students)
-    allowed_names = set(student_lookup.keys())
-    base_team_count = len(base_teams or [])
-    errors = []
-    warnings = []
-    team_evaluations = []
+    candidate_teams = get_candidate_teams(candidate_result) #candidate_result를 리스트로 저장
+    student_lookup = build_student_lookup(analyzed_students) #이름 없으면 빼주기
+    allowed_names = set(student_lookup.keys()) #이름 가져온것을 set으로이거 중복 제거
+    base_team_count = len(base_teams or []) #팀 개수
+    errors = [] #밑에서 추가할 에러 리스트
+    warnings = [] #팀 오류 리스트
+    team_evaluations = [] #밑에서 검증하면서 추가했던거 저장
 
     if not candidate_teams:
         errors.append("검증할 팀 결과가 없습니다.")
@@ -503,25 +504,120 @@ def validation_balance_team(candidate_result, analyzed_students, base_teams=None
 
 def evaluate_balance_node(state: MatchingState) -> Dict[str, Any]:
     # llm_result가 있으면 LLM 제안안을 검증하고, 없으면 알고리즘 teams를 검증한다.
-    # 검증 결과만 state에 저장하고 final_result는 finalize_node에서 따로 저장하는 구조가 좋다.
+    # 1. 알고리즘 검증을 먼저 돌린다.
+    # 2. 알고리즘 검증 결과를 LLM prompt에 넣어서 LLM 검증을 돌린다.
+    # 3. 둘 다 통과해야 finalize_node로 갈 수 있도록 balance_result를 합친다.
+    # final_result는 여기서 저장하지 않고 finalize_node에서 따로 저장하는 구조가 좋다.
     analyzed_students = state.get("analyzed_students", [])
     base_teams = state.get("teams", [])
     candidate_result = state.get("llm_result") or base_teams
 
-    balance_result, team_evaluations = validation_balance_team(
+    algorithm_result, team_evaluations = validation_balance_team( #알고리즘으로 검증
         candidate_result=candidate_result,
         analyzed_students=analyzed_students,
         base_teams=base_teams,
+    )
+    llm_result = llm_validation_balance_team( #llm으로 검증
+        candidate_result=candidate_result,
+        analyzed_students=analyzed_students,
+        algorithm_result=algorithm_result,
+    )
+    balance_result = merge_balance_results( #llm으로 검증한 결과와 알고리즘으로 검증한 결과 병합해서 최종적으로 어떻게 할건지 반환
+        algorithm_result=algorithm_result,
+        llm_result=llm_result,
     )
 
     return {
         "balance_result": balance_result,
         "team_evaluations": team_evaluations,
     }
-    # validation_balance_team에서 수정할 필요 없다고 해도 여기서 한번 챗봇으로 검증하는 로직은
-    # 나중에 별도 llm_evaluate_balance_node로 분리하는 편이 안전하다.
+
+#llm 검증로직
+#팀 하나에 대한 평가
+class LLMBalanceTeamEvaluation(BaseModel):
+    team_name: str #팀이름
+    is_balanced: bool #팀 균형
+    need_adjustment: bool #조정 필요한지 bool
+    strengths: str #팀 강점 
+    risks: str #팀 약점
+    adjustment_suggestion: str #조정 제안
+
+#전체적인 팀 매칭 결과에 대한 평가
+class LLMBalanceResult(BaseModel):
+    is_balanced: bool #전체적인 벨런스
+    need_adjustment: bool #수정이 필요한지 bool
+    overall_reason: str #이렇게 생각한 이유
+    adjustment_request: str #수정 요청 수정이 필요하면 어떻게 수정할지
+    team_evaluations: List[LLMBalanceTeamEvaluation] #각 팀 평가
+
+def get_llm_balance_prompt_chain():
+    system_prompt = """
+    당신은 캡스톤 프로젝트 팀 매칭 결과를 검증하는 평가자다.
+    숫자 계산, 이름 중복, 누락 검증은 algorithm_result를 우선한다.
+    너는 협업 시너지, 역할 적합성, 팀별 리스크를 평가한다.
+    """
+
+    user_prompt = """
+    candidate_result:
+    {candidate_result}
+
+    student_analysis:
+    {student_analysis}
+
+    algorithm_result:
+    {algorithm_result}
+    """
+
+    return ChatPromptTemplate.from_messages([
+        ("system", system_prompt),
+        ("human", user_prompt),
+    ])
+
+def llm_validation_balance_team(candidate_result, analyzed_students, algorithm_result):
+    llm = get_llm()
+    structured_llm = llm.with_structured_output(LLMBalanceResult) #스키마 넣어줘서 structured_llm 만들어줌
+    chain = get_llm_balance_prompt_chain() | structured_llm
+
+    response = chain.invoke({
+        "candidate_result": json.dumps(candidate_result, ensure_ascii=False, indent=2),
+        "student_analysis": json.dumps(analyzed_students, ensure_ascii=False, indent=2),
+        "algorithm_result": json.dumps(algorithm_result, ensure_ascii=False, indent=2),
+    })
+
+    return response.model_dump()
 
 
+def merge_balance_results(algorithm_result, llm_result):
+    # 알고리즘 검증 + LLM 검증 결과를 하나의 balance_result로 합친다.
+    # 둘 다 통과해야 최종 통과이고, 하나라도 수정 필요하면 수정 노드로 보내기 위한 형태다.
+    algorithm_is_balanced = algorithm_result.get("is_balanced", False) #균형 맞는지 is_balanced 반환하고 없으면 False반환
+    llm_is_balanced = llm_result.get("is_balanced", False) #위랑 마찬가지
+    algorithm_need_adjustment = algorithm_result.get("need_adjustment", True) #수정 필요한지 need_adjustment반환하고 없으면 True반환
+    llm_need_adjustment = llm_result.get("need_adjustment", True) #위랑 마찬가지
+
+    is_balanced = algorithm_is_balanced and llm_is_balanced #and로 둘다 True아니면 수정
+    need_adjustment = algorithm_need_adjustment or llm_need_adjustment #True면 수정해야 되기 때문에 or로 둘다 false아니면 수정
+
+    return {
+        "is_balanced": is_balanced,
+        "need_adjustment": need_adjustment,
+        "next_node": "finalize_node" if is_balanced and not need_adjustment else "adjust_team_node", #다음 노드 뭘로 할지
+        "algorithm_result": algorithm_result,
+        "llm_result": llm_result,
+        "errors": algorithm_result.get("errors", []),
+        "warnings": algorithm_result.get("warnings", []),
+        "adjustment_request": llm_result.get("adjustment_request", ""),
+    }
+
+
+def should_adjust(state: MatchingState):
+    # LangGraph 조건 분기 함수.
+    # 둘 다 통과하면 finalize_node, 하나라도 실패/수정 필요이면 adjust_team_node로 보낸다.
+    #balance_result로 finalize_node adjust_team_node 구별
+    balance_result = state.get("balance_result", {}) 
+    if balance_result.get("is_balanced") and not balance_result.get("need_adjustment"):
+        return "finalize_node"
+    return "adjust_team_node"
 
 #team으로 알고리즘으로 team상태 저장하고
 #llm_result로 llm이 제안한 팀 상태 저장하고
