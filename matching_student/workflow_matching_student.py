@@ -39,6 +39,10 @@ SKILL_LEVEL_SCORE = {
 
 
 
+
+
+
+
 #node
 def load_analysis_output_json():
     with open(ANALYSIS_OUTPUT_PATH,'r',encoding='utf-8') as f: #r은 읽기모드로 열겠다는 뜻이고 ,as f는 f라는 변수로 받겠다는거임. 
@@ -321,6 +325,7 @@ def create_team_node(state: MatchingState) -> Dict[str, Any]:
 
 
 
+
 #밸런스 검사 노드
 #llm_result 또는 teams를 가져와서 전체 평가 결과는 balance_result에,
 #팀별 평가 결과는 team_evaluations에 저장한다.
@@ -572,7 +577,7 @@ def get_llm_balance_prompt_chain():
         ("system", system_prompt),
         ("human", user_prompt),
     ])
-
+#llm으로 검증
 def llm_validation_balance_team(candidate_result, analyzed_students, algorithm_result):
     llm = get_llm()
     structured_llm = llm.with_structured_output(LLMBalanceResult) #스키마 넣어줘서 structured_llm 만들어줌
@@ -585,6 +590,7 @@ def llm_validation_balance_team(candidate_result, analyzed_students, algorithm_r
     })
 
     return response.model_dump()
+
 
 
 def merge_balance_results(algorithm_result, llm_result):
@@ -619,12 +625,94 @@ def should_adjust(state: MatchingState):
         return "finalize_node"
     return "adjust_team_node"
 
-#team으로 알고리즘으로 team상태 저장하고
-#llm_result로 llm이 제안한 팀 상태 저장하고
-#검증할때 실패하면 다시 알고리즘 보고 할수있도록 알고리즘은 그대로 두고 llm_result만 계속 덮어 씌어지면서 수정
+
+
+
+
+
+
+
+
 
 
 #팀 수정 노드
+#team으로 알고리즘으로 team상태 저장하고
+#llm_result로 llm이 제안한 팀 상태 저장하고
+#검증할때 실패하면 다시 알고리즘 보고 할수있도록 알고리즘은 그대로 두고 llm_result만 계속 덮어 씌어지면서 수정
+#수정 노드 작성할때 수정한 횟수 만큼 iteration_count올려야함 
+# TeamMatchingResult, FinalTeam, get_llm()은 위에서 정의한 것을 재사용한다.
+def get_adjust_team_prompt_chain():
+    system_prompt = """
+    당신은 캡스톤 프로젝트 팀 매칭 결과를 수정하는 담당자다.
+    현재 팀 후보는 검증을 통과하지 못했거나 수정이 필요하다는 평가를 받았다.
+    balance_result의 알고리즘 검증 결과와 LLM 검증 결과를 모두 반영해서 팀을 다시 제안하라.
+
+    수정 원칙:
+    - current_candidate를 기본으로 유지하고, 문제가 있는 부분만 최소한으로 수정한다.
+    - algorithm_teams는 원래 알고리즘 초안이므로 참고 기준으로 사용한다.
+    - 모든 학생은 정확히 한 팀에만 배정한다.
+    - 팀 수는 algorithm_teams와 동일하게 유지한다.
+    - 팀별 인원 차이는 1명 이하로 유지한다.
+    - 팀 총점 차이를 크게 악화시키지 않는다.
+    - 낮음 학생은 가능하면 보통 또는 높음 학생과 함께 둔다.
+    - 같은 role_group만으로 구성된 팀은 가능하면 피한다.
+    - adjustment_history와 같은 수정 패턴을 반복하지 않는다.
+
+    반영해야 할 정보:
+    - balance_result.algorithm_result.errors는 반드시 해결한다.
+    - balance_result.algorithm_result.warnings는 가능하면 완화한다.
+    - balance_result.llm_result.adjustment_request를 우선적으로 반영한다.
+    - student_analysis의 strength, weakness, suggestion을 활용해 협업 시너지를 높인다.
+
+    계산 규칙:
+    - 점수는 student_analysis 또는 algorithm_teams에 있는 score 값만 사용한다.
+    - 새로운 점수나 skill_level을 만들지 않는다.
+    - total_score는 최종 팀원의 score 합으로 작성한다.
+
+    이름 사용 규칙:
+    - allowed_student_names에 있는 이름만 사용한다.
+    - 학생 이름은 한 글자도 바꾸지 말고 그대로 복사한다.
+    - allowed_student_names에 없는 학생을 만들지 않는다.
+
+    출력 규칙:
+    - 반드시 지정된 structured output schema에 맞춰 출력한다.
+    - final_teams의 각 팀은 team_name, members, total_score, role_groups, leader, reason을 포함한다.
+    - members는 학생 이름 문자열 배열로만 작성한다.
+    - changed는 current_candidate에서 팀원이 바뀌었으면 true, 그대로면 false다.
+    - change_summary에는 어떤 검증 실패를 어떻게 고쳤는지 작성한다.
+    - validation_notes에는 다시 검증할 때 확인해야 할 내용을 작성한다.
+    """
+
+    user_prompt = """
+    아래 검증 실패 정보를 바탕으로 팀 후보를 수정해라.
+
+    allowed_student_names:
+    {allowed_student_names}
+
+    student_analysis:
+    {student_analysis}
+
+    algorithm_teams:
+    {algorithm_teams}
+
+    current_candidate:
+    {current_candidate}
+
+    balance_result:
+    {balance_result}
+
+    adjustment_history:
+    {adjustment_history}
+    """
+
+    return ChatPromptTemplate.from_messages([
+        ("system", system_prompt),
+        ("human", user_prompt),
+    ])
+
+#iteration_count 3으로할지 4로할지.
+def adjust_team_node(state: MatchingState) -> Dict[str, Any]:
+
 #balance_result와 team_evalution결과가 좋으면 final_result에 바로 저장하고 안좋으면 수정하여 adjustment_history에 기록하여 같은결과과 나오지 않도록함
 #그리고 또 별로라면 다시 수정 밸런스검사 좋을때까지 반복.
 #   - adjust: 팀 상태가 별로라서 다시 고치는 단계
@@ -670,3 +758,5 @@ def should_adjust(state: MatchingState):
 #   finalize_node
 
 #   최종 팀 결과와 설명을 final_result에 저장.
+
+#근데 이거 코드 ㅈㄴ 길어서 토큰값 레전드로 많이 나올듯 이걸 계속 검증하는거니까
