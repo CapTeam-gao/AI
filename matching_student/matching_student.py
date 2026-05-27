@@ -7,6 +7,8 @@ load_dotenv(override=True)
 
 from langchain_upstage import ChatUpstage
 from langchain_core.prompts import ChatPromptTemplate
+from pydantic import BaseModel, Field
+from typing import Dict, List
 
 ANALYSIS_OUTPUT_PATH = "/Users/kshi3430/CapTeam/data/student_analysis_data/analysis_output.json"
 MATCHING_OUTPUT_PATH = "/Users/kshi3430/CapTeam/data/student_analysis_data/matching_output.json"
@@ -18,6 +20,22 @@ SKILL_LEVEL_SCORE = {
     "보통": 2,
     "낮음": 1,
 }
+
+
+class FinalTeam(BaseModel):
+    team_name: str = Field(description="팀 이름")
+    members: List[str] = Field(description="팀원 이름 목록")
+    total_score: float = Field(description="팀원 score 합계")
+    role_groups: Dict[str, int] = Field(description="역할군별 인원 수")
+    leader: str = Field(description="추천 팀장 이름")
+    reason: str = Field(description="팀 매칭 이유")
+
+
+class TeamMatchingResult(BaseModel):
+    final_teams: List[FinalTeam] = Field(description="최종 팀 매칭 결과")
+    changed: bool = Field(description="initial_teams에서 팀원이 바뀌었으면 true")
+    change_summary: str = Field(description="변경 요약")
+    validation_notes: str = Field(description="매칭 기준 검증 메모")
 
 
 def load_analysis_output_json():
@@ -36,15 +54,29 @@ def get_prompt_chain():
     # 규칙 기반으로 만든 1차 팀 배정안을 LLM에게 넘기고,
     # LLM은 역할 구성과 설명을 더 자연스럽게 정리하는 역할을 한다.
     matching_s_prompt = """
-당신은 학생들의 코딩 실력 분석 결과를 바탕으로 캡스톤 프로젝트 팀을 매칭하는 챗봇이다.
-아래 학생 분석 결과와 1차 팀 배정안을 참고해서 균형 잡힌 최종 팀을 만들어라.
+당신은 학생들의 코딩 실력 분석 결과를 바탕으로 캡스톤 프로젝트 팀 매칭을 보정하는 전문가다.
+학생 분석 결과와 알고리즘이 만든 1차 팀 배정안을 참고해서 최종 팀을 만든다.
+
+핵심 역할:
+- 1차 팀 배정안을 기본 정답으로 보고, 명확히 더 좋은 조합이 있을 때만 최소한으로 보정한다.
+- 보정이 필요하지 않으면 initial_teams를 그대로 유지하고 이유만 설명한다.
+- 팀별 총점, 역할 다양성, 낮음 학생 지원 가능성, 협업 시너지를 함께 판단한다.
 
 매칭 기준:
 - 각 팀의 전체 실력 합계가 너무 차이 나지 않게 한다.
 - 가능하면 프론트엔드, 백엔드, AI/데이터, 기타 역할이 한 팀에 몰리지 않게 한다.
 - 낮음 학생은 보통 또는 높음 학생과 함께 배치한다.
 - 같은 역할만 모인 팀은 피한다. 
+- 팀 수는 initial_teams의 팀 수와 동일하게 유지한다.
+- 팀별 인원 차이는 1명 이하를 유지한다.
+- 팀 총점 차이를 크게 악화시키는 재배정은 하지 않는다.
 - 아직 선호 팀원, 팀장 선호도 데이터는 없으므로 실력/역할 균형을 우선한다.
+
+계산 규칙:
+- 점수는 student_analysis 또는 initial_teams에 있는 score 값만 사용한다.
+- 새로운 점수를 만들거나 skill_level을 바꾸지 않는다.
+- total_score는 최종 팀원의 score 합으로 계산한다.
+- 계산을 여러 번 번복하지 말고 최종 결과만 출력한다.
 
 이름 사용 규칙:
 - 아래 allowed_student_names에 있는 이름만 사용한다.
@@ -53,15 +85,11 @@ def get_prompt_chain():
 - 모든 학생은 정확히 한 팀에만 들어가야 한다.
 
 출력 형식:
-팀 1:
-- 팀원:
-- 역할 구성:
-- 실력 균형 설명:
-- 추천 팀장:
-- 매칭 이유:
-
-팀 2:
-...
+- 반드시 지정된 structured output schema에 맞춰 출력한다.
+- 최상위 키는 final_teams, changed, change_summary, validation_notes만 사용한다.
+- final_teams의 각 팀은 team_name, members, total_score, role_groups, leader, reason을 포함한다.
+- members는 학생 이름 문자열 배열로만 작성한다.
+- changed는 initial_teams에서 팀원이 바뀌었으면 true, 그대로면 false다.
 
 allowed_student_names:
 {allowed_student_names}
@@ -139,9 +167,8 @@ def make_student_summary(student):
         "role_group": get_role_group(student.get("role")),
         "strength": student.get("strength"),
         "weakness": student.get("weakness"),
+        "suggestion": student.get("suggestion"),
     }
-
-    #suggestion은 왜 안보는지 모르겠음 기껏만들었더니. 보도록 만들어야할듯.
 
 
 def get_student_names(students):
@@ -236,6 +263,9 @@ def save_matching_result(result):
 def validate_ai_matching_names(ai_matching, allowed_student_names):
     # AI 응답에 원본 학생 이름이 모두 들어있는지 확인한다.
     # 이름을 다르게 쓰거나 빼먹으면 해당 이름이 missing_names에 잡힌다.
+    if not isinstance(ai_matching, str):
+        ai_matching = json.dumps(ai_matching, ensure_ascii=False)
+
     missing_names = [
         name for name in allowed_student_names
         if name not in ai_matching
@@ -256,6 +286,15 @@ def request_ai_matching(chain, results, initial_teams, allowed_student_names, in
         "initial_teams": json.dumps(initial_teams, ensure_ascii=False, indent=2),
         "input": input_message,
     })
+
+
+def serialize_structured_response(response):
+    # structured output 응답은 pydantic 객체라 json 저장이 가능하도록 dict로 바꾼다.
+    if hasattr(response, "model_dump"):
+        return response.model_dump()
+    if hasattr(response, "dict"):
+        return response.dict()
+    return response
 
 
 def get_response(team_size=4, team_count=None, use_ai=True, retry_on_invalid_name=True):
@@ -285,7 +324,8 @@ def get_response(team_size=4, team_count=None, use_ai=True, retry_on_invalid_nam
 
     llm = get_llm()
     s_prompt = get_prompt_chain()
-    chain = s_prompt | llm
+    structured_llm = llm.with_structured_output(TeamMatchingResult)
+    chain = s_prompt | structured_llm
 
     # 학생 분석 원본, 원본 이름 목록, 1차 팀 배정안을 함께 넘긴다.
     # LLM은 이 정보를 보고 최종 팀 구성, 추천 팀장, 매칭 이유를 작성한다.
@@ -296,7 +336,7 @@ def get_response(team_size=4, team_count=None, use_ai=True, retry_on_invalid_nam
         allowed_student_names,
         "1차 팀 배정안을 바탕으로 균형 잡힌 최종 프로젝트 팀을 만들어줘.",
     )
-    ai_matching = response.content
+    ai_matching = serialize_structured_response(response)
     name_validation = validate_ai_matching_names(ai_matching, allowed_student_names)
 
     if retry_on_invalid_name and not name_validation["is_valid"]:
@@ -313,7 +353,7 @@ def get_response(team_size=4, team_count=None, use_ai=True, retry_on_invalid_nam
                 "allowed_student_names의 이름만 정확히 사용해서 다시 작성해줘."
             ),
         )
-        ai_matching = retry_response.content
+        ai_matching = serialize_structured_response(retry_response)
         name_validation = validate_ai_matching_names(ai_matching, allowed_student_names)
 
     output = {
@@ -325,7 +365,7 @@ def get_response(team_size=4, team_count=None, use_ai=True, retry_on_invalid_nam
     }
     save_matching_result(output)
 
-    print(ai_matching)
+    print(json.dumps(ai_matching, ensure_ascii=False, indent=2))
     if not name_validation["is_valid"]:
         print(f"이름 검증 실패: {name_validation['missing_names']}")
     print(f"매칭 결과 저장 완료: {MATCHING_OUTPUT_PATH}")
