@@ -577,6 +577,8 @@ def get_llm_balance_prompt_chain():
         ("system", system_prompt),
         ("human", user_prompt),
     ])
+
+
 #llm으로 검증
 def llm_validation_balance_team(candidate_result, analyzed_students, algorithm_result):
     llm = get_llm()
@@ -757,15 +759,89 @@ def adjust_team_node(state: MatchingState) -> Dict[str, Any]:
         "adjustment_history": adjustment_history + [adjustment_record], #기존 조정기록에 요번에 추가한 리스트
     }
 
+
+
+
+
+
+
+
+
+
+
+#최종 설명노드
+#검증된 매칭된 팀 final_result출력
+def finalize_node(state: MatchingState) -> Dict[str, Any]:
+    final_result = {
+        "final_teams": state.get("llm_result"),
+        "algorithm_teams": state.get("teams", []),
+        "balance_result": state.get("balance_result", {}),
+        "team_evaluations": state.get("team_evaluations", []),
+        "adjustment_history": state.get("adjustment_history", []),
+        "iteration_count": state.get("iteration_count", 0),
+    }
+
+    return {
+        "final_result": final_result
+    }
+
+#langgrph로 workflow형식으로 구축
+from langgraph.graph import StateGraph, START, END
+
+workflow = StateGraph(MatchingState)
+# START
+# -> create_team_node
+# -> llm_analyzed
+# -> evaluate_balance_node
+# -> should_adjust
+#    -> finalize_node
+#    -> adjust_team_node
+# -> adjust_team_node
+# -> evaluate_balance_node
+# -> END
+#노드 추가.
+workflow.add_node('create_team_node',create_team_node) #알고리즘으로 팀 생성
+workflow.add_node('llm_analyzed',llm_analyzed) #llm으로 생성
+workflow.add_node('evaluate_balance_node',evaluate_balance_node) #팀 검증 노드
+workflow.add_node('adjust_team_node',adjust_team_node) #팀 수정 노드
+workflow.add_node("finalize_node", finalize_node) #최종결과 노드
+
+workflow.add_edge(START,'create_team_node')
+workflow.add_edge('create_team_node','llm_analyzed')
+workflow.add_edge('llm_analyzed','evaluate_balance_node')
+
+workflow.add_conditional_edges(
+    'evaluate_balance_node',
+    should_adjust,#조건 분기 함수 하나라도 수정필요면 adjust_team_node로 보내서 수정시킴.
+    {
+        'finalize_node' : 'finalize_node',
+        'adjust_team_node' : 'adjust_team_node',
+    }
+)   
+
+workflow.add_edge('adjust_team_node','evaluate_balance_node')
+workflow.add_edge('finalize_node',END)
+
+app = workflow.compile()
+
+initial_state = {
+    "analyzed_students": load_analysis_output_json(), #여기서 불러온거 학생분석 analyzed state에 넣어줌
+    "teams": [],
+    "balance_result": {},
+    "team_evaluations": [],
+    "adjustment_history": [],
+    "final_result": {},
+    "llm_result": {},
+    "iteration_count": 0,
+}
+
+result = app.invoke(initial_state)
+
 #balance_result와 team_evalution결과가 좋으면 final_result에 바로 저장하고 안좋으면 수정하여 adjustment_history에 기록하여 같은결과과 나오지 않도록함
 #그리고 또 별로라면 다시 수정 밸런스검사 좋을때까지 반복.
 #   - adjust: 팀 상태가 별로라서 다시 고치는 단계
 #   - finalize: 팀 상태가 좋아서 최종 확정하는 단계
 #이런식으로 저장
-
-#최종 설명노드
-#검증된 매칭된 팀 final_result출력
-
 
 # load_analysis_node
 
@@ -804,3 +880,7 @@ def adjust_team_node(state: MatchingState) -> Dict[str, Any]:
 #   최종 팀 결과와 설명을 final_result에 저장.
 
 #근데 이거 코드 ㅈㄴ 길어서 토큰값 레전드로 많이 나올듯 이걸 계속 검증하는거니까
+
+#현재 팀 매칭 로직은 LangGraph 기반 workflow 구조로 설계했습니다. 
+#각 단계는 노드로 분리되어 있고, 팀 생성, LLM 보정, 알고리즘 검증, LLM 검증, 수정, 최종 확정 노드가 state를 주고받으며 동작합니다.
+#검증 결과에 따라 최종 확정 또는 수정 노드로 분기하고, 수정된 결과는 다시 검증 단계로 돌아가는 반복 구조입니다.
