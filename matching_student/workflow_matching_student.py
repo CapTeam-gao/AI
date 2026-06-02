@@ -1,12 +1,13 @@
 from langchain.chat_models import init_chat_model
 from typing import Any,List,TypedDict,Dict
+import os
 import json
 import math
 import re
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"), override=True)
 #역할을 다양하게 균형 잡힌 팀 1순위 , 선호팀원 2순위 
 def get_llm(model = 'gpt-5-nano'):
     return init_chat_model(model = model)
@@ -62,8 +63,8 @@ def parse_stack_score(stack_score):
         return 0
     return sum(scores) / len(scores)
 
-
-
+#여기 수정해야함
+#여기 점수 계산 로직 이거 수정해야할듯 지금 구조가 너무 점수에 의존하는 구조인데 지금 그냥 평균내거나 곱해서 그냥 점수 계산하니까 성능이 좀 많이 안좋아짐.
 def get_student_score(student):
     # 학생 한 명의 매칭용 점수 계산.
     # skill_level을 큰 기준으로 보고, stack_score 평균을 보조 점수로 더함.
@@ -81,7 +82,7 @@ def get_role_group(role):
     # role은 "Frontend Developer", "백엔드 개발자", "AI 엔지니어"처럼 표현이 제각각이라
     # 큰 역할군으로 묶어서 한 팀에 같은 역할이 몰리지 않게 할 때 사용함.
     role_text = (role or "").lower()
-
+    #근데 테스트 해보니까 role에서 ai하고 backend가 둘다 들어가 있을때가 있음(ai/backend엔지니어 이런느낌으로) 그거 방지도 해야할듯
     if any(keyword in role_text for keyword in ["frontend", "front", "프론트"]):
         return "frontend"
     if any(keyword in role_text for keyword in ["backend", "back", "서버", "server", "백엔드"]):
@@ -191,13 +192,23 @@ def get_student_names(students):
     return [student.get("name") for student in students if student.get("name")] #리스트 컴프리헨션
 
 #팀 구성 TeamMatchingResult에 final_teams에 list로 들어감.
+class RoleGroupCount(BaseModel):
+    role_group: str = Field(description="역할군 이름. 예: frontend, backend, ai_data, game, etc")
+    count: int = Field(description="해당 역할군 인원 수")
+
+
 class FinalTeam(BaseModel):
     team_name: str = Field(description="팀 이름")
     members: List[str] = Field(description="팀원 이름 목록")
     total_score: float = Field(description="팀원 score 합계")
-    role_groups: Dict[str, int] = Field(description="역할군별 인원 수")
+    role_groups: List[RoleGroupCount] = Field(description="역할군별 인원 수")
     leader: str = Field(description="추천 팀장 이름")
-    reason: str = Field(description="팀 매칭 이유")
+    reason: str = Field(description=(
+        "해당 팀원들이 함께 배정된 구체적인 이유. "
+        "학생별 역할, 실력 수준, 구현 경험, 강점과 약점의 보완 관계를 근거로 작성한다. "
+        "'초안 유지', '총점 변화 없음', '점수 차이가 작음', '구성이 안정적임', '균형이 유지됨' 같은 "
+        "추상적인 검증 문구만으로 답변하지 않는다."
+    ))
 
 #팀 매칭할때 변경되었는거 알려주는
 class TeamMatchingResult(BaseModel):
@@ -241,9 +252,13 @@ def get_matching_prompt_chain():
 출력 규칙:
 - 반드시 지정된 structured output schema에 맞춰 출력한다.
 - 최상위 키는 final_teams, changed, change_summary, validation_notes만 사용한다.
-- final_teams의 각 팀은 team_name, members, total_score, role_groups, leader, reason을 포함한다.
-- members는 학생 이름 문자열 배열로만 작성한다.
-- changed는 initial_teams에서 팀원이 바뀌었으면 true, 그대로면 false다.
+	- final_teams의 각 팀은 team_name, members, total_score, role_groups, leader, reason을 포함한다.
+		- role_groups는 [{{"role_group": "backend", "count": 1}}] 같은 배열 형식으로 작성한다.
+		- members는 학생 이름 문자열 배열로만 작성한다.
+		- changed는 initial_teams에서 팀원이 바뀌었으면 true, 그대로면 false다.
+        - reason에는 팀원이 함께 배정된 구체적인 이유를 작성한다.
+        - reason에서 '초안 유지', '총점 변화 없음', '점수 차이가 작음', '구성이 안정적임', '균형이 유지됨' 같은 추상적 검증 문구만 쓰지 않는다.
+        - reason은 학생의 역할, 구현 경험, 강점과 약점 보완 관계를 직접 언급해야 한다.
 """
 
     user_prompt = """
@@ -324,6 +339,7 @@ def create_team_node(state: MatchingState) -> Dict[str, Any]:
 
 
 
+#지금 여기 검증로직에서 그냥 점수만 대충 맞으면 llm도 알았다하고 알고리즘도 통과되서 검증뚫기가 너무 쉬움 여기부분 최적화 해야할듯
 
 
 #밸런스 검사 노드
@@ -483,7 +499,8 @@ def validation_balance_team(candidate_result, analyzed_students, base_teams=None
     ]
     score_gap = round(max(team_scores) - min(team_scores), 2) if team_scores else 0
     average_score = round(sum(team_scores) / len(team_scores), 2) if team_scores else 0
-    max_score_gap = max(10, average_score * 0.2) if average_score else 0
+    max_score_gap = max(8, average_score * 0.13) if average_score else 0
+    #max_score_gap 좀수정함 이거 검증이 너무 쉽게 통과 되는거 같아서.
 
     if team_scores and score_gap > max_score_gap:
         warnings.append(
@@ -540,21 +557,29 @@ def evaluate_balance_node(state: MatchingState) -> Dict[str, Any]:
 #llm 검증로직
 #팀 하나에 대한 평가
 class LLMBalanceTeamEvaluation(BaseModel):
-    team_name: str #팀이름
-    is_balanced: bool #팀 균형
-    need_adjustment: bool #조정 필요한지 bool
-    strengths: str #팀 강점 
-    risks: str #팀 약점
-    adjustment_suggestion: str #조정 제안
+    team_name: str = Field(description = "평가 대상 팀 이름") #팀이름
+    is_balanced: bool = Field(description = "해당 팀이 역할, 실력, 협업 리스크 측면에서 균형적인지 여부") #팀 균형
+    need_adjustment: bool = Field(description = "해당 팀에 팀원 조정이 필요한지 여부") #조정 필요한지 bool
+    matching_reason : str = Field (description = (
+        "해당 팀원들이 함께 배정된 구체적인 이유를 작성한다. "
+        "반드시 학생별 역할, 실력 수준, 구현 경험, 강점과 약점의 보완 관계를 근거로 설명한다. "
+        "특정 역할 인원이 적더라도 해당 역할 담당자의 실력이나 경험으로 감당 가능하다면 그 근거를 명확히 쓴다. "
+        "팀당 2~3개의 핵심 이유를 자연스러운 문장으로 작성한다. "
+        "'초안 유지', '총점 변화 없음', '점수 차이가 작음', '구성이 안정적임', '균형이 유지됨', '역할 다양성이 좋음' 같은 일반적인 평가 문구만으로 답변하면 안 된다. "
+        "점수나 균형 상태를 요약하지 말고, 왜 이 학생들이 같은 팀이어야 하는지 설명한다."
+    ))
+    strengths: str = Field(description = "해당 팀의 특별한 강점을 구체적으로 설명") #팀 강점 
+    risks: str = Field(description = "해당 팀의 특별한 리스크 또는 약점을 구체적으로 설명") #팀 약점
+    adjustment_suggestion: str = Field(description = "조정이 필요할 경우 구체적인 수정 제안") #조정 제안
 
 #전체적인 팀 매칭 결과에 대한 평가
 class LLMBalanceResult(BaseModel):
-    is_balanced: bool #전체적인 벨런스
-    need_adjustment: bool #수정이 필요한지 bool
-    overall_reason: str #이렇게 생각한 이유
-    adjustment_request: str #수정 요청 수정이 필요하면 어떻게 수정할지
-    team_evaluations: List[LLMBalanceTeamEvaluation] #각 팀 평가
-
+    is_balanced: bool = Field(description = "전체 팀 매칭 결과가 균형적인지 여부") #전체적인 벨런스
+    need_adjustment: bool = Field(description = "전체 팀 매칭 결과에 수정이 필요한지 여부") #수정이 필요한지 bool
+    overall_reason: str = Field(description = "전체 균형 평가 판단 이유") #이렇게 생각한 이유 
+    adjustment_request: str = Field(description = "수정이 필요할 경우 adjust_team_node에 전달할 구체적인 수정 요청") #수정 요청 수정이 필요하면 어떻게 수정할지
+    team_evaluations: List[LLMBalanceTeamEvaluation] = Field(description = "팀별 균형 평가 결과") #각 팀 평가
+#이거 strutured output으로 쓰는데 description이 안적혀있음
 def get_llm_balance_prompt_chain():
     system_prompt = """
     당신은 캡스톤 프로젝트 팀 매칭 결과를 검증하는 평가자다.
@@ -618,12 +643,16 @@ def merge_balance_results(algorithm_result, llm_result):
     }
 
 
+MAX_ITERATION = 3
+
 def should_adjust(state: MatchingState):
     # LangGraph 조건 분기 함수.
     # 둘 다 통과하면 finalize_node, 하나라도 실패/수정 필요이면 adjust_team_node로 보낸다.
     #balance_result로 finalize_node adjust_team_node 구별
     balance_result = state.get("balance_result", {}) 
     if balance_result.get("is_balanced") and not balance_result.get("need_adjustment"):
+        return "finalize_node"
+    if state.get('iteration_count',0) >= MAX_ITERATION:
         return "finalize_node"
     return "adjust_team_node"
 
@@ -679,8 +708,12 @@ def get_adjust_team_prompt_chain():
     출력 규칙:
     - 반드시 지정된 structured output schema에 맞춰 출력한다.
     - final_teams의 각 팀은 team_name, members, total_score, role_groups, leader, reason을 포함한다.
+    - role_groups는 [{{"role_group": "backend", "count": 1}}] 같은 배열 형식으로 작성한다.
     - members는 학생 이름 문자열 배열로만 작성한다.
     - changed는 current_candidate에서 팀원이 바뀌었으면 true, 그대로면 false다.
+    - reason에는 팀원이 함께 배정된 구체적인 이유를 작성한다.
+    - reason에서 '초안 유지', '총점 변화 없음', '점수 차이가 작음', '구성이 안정적임', '균형이 유지됨' 같은 추상적 검증 문구만 쓰지 않는다.
+    - reason은 학생의 역할, 구현 경험, 강점과 약점 보완 관계를 직접 언급해야 한다.
     - change_summary에는 어떤 검증 실패를 어떻게 고쳤는지 작성한다.
     - validation_notes에는 다시 검증할 때 확인해야 할 내용을 작성한다.
     """
@@ -772,13 +805,24 @@ def adjust_team_node(state: MatchingState) -> Dict[str, Any]:
 #최종 설명노드
 #검증된 매칭된 팀 final_result출력
 def finalize_node(state: MatchingState) -> Dict[str, Any]:
+    balance_result = state.get("balance_result", {})
+    iteration_count = state.get("iteration_count", 0)
+
+    if balance_result.get("is_balanced") and not balance_result.get("need_adjustment"):
+        finalized_by = "validation_passed"
+    elif iteration_count >= MAX_ITERATION:
+        finalized_by = "max_iteration"
+    else:
+        finalized_by = "manual_finalize"
+
     final_result = {
-        "final_teams": state.get("llm_result"),
+        "final_teams": state.get("llm_result") or state.get("teams", []),
         "algorithm_teams": state.get("teams", []),
-        "balance_result": state.get("balance_result", {}),
+        "balance_result": balance_result,
         "team_evaluations": state.get("team_evaluations", []),
         "adjustment_history": state.get("adjustment_history", []),
-        "iteration_count": state.get("iteration_count", 0),
+        "iteration_count": iteration_count,
+        "finalized_by": finalized_by,
     }
 
     return {
@@ -824,19 +868,56 @@ workflow.add_edge('finalize_node',END)
 
 app = workflow.compile()
 
-initial_state = {
-    "analyzed_students": load_analysis_output_json(), #여기서 불러온거 학생분석 analyzed state에 넣어줌
-    "teams": [],
-    "balance_result": {},
-    "team_evaluations": [],
-    "adjustment_history": [],
-    "final_result": {},
-    "llm_result": {},
-    "iteration_count": 0,
-}
 
-result = app.invoke(initial_state)
+def save_workflow_result(result):
+    with open(MATCHING_OUTPUT_PATH, "w", encoding="utf-8") as f:
+        json.dump(result, f, ensure_ascii=False, indent=2)
 
+
+def load_cached_matching_result():
+    # 이미 매칭 결과 파일이 있고 내용이 있으면 기존 결과를 재사용한다.
+    # FORCE_REMATCH=true 환경변수를 주면 기존 결과가 있어도 새로 매칭한다.
+    force_rematch = os.getenv("FORCE_REMATCH", "false").lower() == "true"
+    if force_rematch:
+        return None
+
+    if not os.path.exists(MATCHING_OUTPUT_PATH):
+        return None
+
+    if os.path.getsize(MATCHING_OUTPUT_PATH) == 0:
+        return None
+
+    with open(MATCHING_OUTPUT_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def build_initial_state() -> MatchingState:
+    return {
+        "analyzed_students": load_analysis_output_json(), #여기서 불러온거 학생분석 analyzed state에 넣어줌
+        "teams": [],
+        "balance_result": {},
+        "team_evaluations": [],
+        "adjustment_history": [],
+        "final_result": {},
+        "llm_result": {},
+        "iteration_count": 0,
+    }
+
+
+def run_workflow():
+    cached_result = load_cached_matching_result()
+    if cached_result is not None:
+        print(f"기존에 매칭이 되어있어 결과 불러오는 중: {MATCHING_OUTPUT_PATH}")
+        return cached_result
+
+    result = app.invoke(build_initial_state())
+    save_workflow_result(result)
+    return result
+
+
+if __name__ == "__main__":
+    result = run_workflow()
+    print(json.dumps(result.get("final_result", result), ensure_ascii=False, indent=2))
 #balance_result와 team_evalution결과가 좋으면 final_result에 바로 저장하고 안좋으면 수정하여 adjustment_history에 기록하여 같은결과과 나오지 않도록함
 #그리고 또 별로라면 다시 수정 밸런스검사 좋을때까지 반복.
 #   - adjust: 팀 상태가 별로라서 다시 고치는 단계
@@ -880,7 +961,9 @@ result = app.invoke(initial_state)
 #   최종 팀 결과와 설명을 final_result에 저장.
 
 #근데 이거 코드 ㅈㄴ 길어서 토큰값 레전드로 많이 나올듯 이걸 계속 검증하는거니까
+#팀 매칭시 학생의 성격과 개발 성향을 고려하여 팀매칭하는로직
 
 #현재 팀 매칭 로직은 LangGraph 기반 workflow 구조로 설계했습니다. 
 #각 단계는 노드로 분리되어 있고, 팀 생성, LLM 보정, 알고리즘 검증, LLM 검증, 수정, 최종 확정 노드가 state를 주고받으며 동작합니다.
 #검증 결과에 따라 최종 확정 또는 수정 노드로 분기하고, 수정된 결과는 다시 검증 단계로 돌아가는 반복 구조입니다.
+#

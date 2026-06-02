@@ -1,6 +1,6 @@
 [
   {
-    "name": "김민준",
+    "name": "장준민",
     "goal": "AI",
     "stack" : ["python" ,"fastapi" ,"java"],
     "experience": [
@@ -18,6 +18,7 @@
       "React로 포트폴리오 웹사이트 제작 및 반응형 UI 구현",
       "쇼핑몰 메인 페이지 클론코딩 및 상태관리(Context API) 적용",
       "Figma로 UI 설계 후 실제 코드로 구현"
+
     ],
     "collaboration": 4
   },
@@ -26,10 +27,11 @@
     "goal": "Frontend",
     "stack": ["html","css","js","react","figma"],
     "experience": [
-      "React로 간단한 투두리스트 구현",
+      "React로 대형 프로젝트 혼자 담당 및 AI 바이브코딩 협업",
       "useState를 이용한 상태 관리 및 useCallback과 useMemo를 이용한 최적화 경험",
       "Figma를 이용한 프로젝트 디자인 경험"
     ],
+    
     "collaboration": 4
   },
   {
@@ -55,7 +57,7 @@
     "collaboration": 3
   },
   {
-    "name": "이준호",
+    "name": "임호권",
     "goal": "Game",
     "stack": ["c#", "unity"],
     "experience": [
@@ -88,6 +90,16 @@
   "html을 이용한 입문 자기소개서 만들기 가능(h1,ul 이용) ",
   "input창 타입을 바꿔서 로그인 폼 뼈대 구현 가능(text,password)"
   ],
-  "collaboration": 1
+  "collaboration": 2
+  },
+  {
+  "name": "지성현",
+  "goal": "backend",
+  "stack" : ["" ,"" ],
+  "experience": [
+  "html을 이용한 입문 자기소개서 만들기 가능(h1,ul 이용) ",
+  "input창 타입을 바꿔서 로그인 폼 뼈대 구현 가능(text,password)"
+  ],
+  "collaboration": 2
   }
 ]

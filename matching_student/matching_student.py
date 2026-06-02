@@ -22,11 +22,16 @@ SKILL_LEVEL_SCORE = {
 }
 
 
+class RoleGroupCount(BaseModel):
+    role_group: str = Field(description="역할군 이름. 예: frontend, backend, ai_data, game, etc")
+    count: int = Field(description="해당 역할군 인원 수")
+
+
 class FinalTeam(BaseModel):
     team_name: str = Field(description="팀 이름")
     members: List[str] = Field(description="팀원 이름 목록")
     total_score: float = Field(description="팀원 score 합계")
-    role_groups: Dict[str, int] = Field(description="역할군별 인원 수")
+    role_groups: List[RoleGroupCount] = Field(description="역할군별 인원 수")
     leader: str = Field(description="추천 팀장 이름")
     reason: str = Field(description="팀 매칭 이유")
 
@@ -88,6 +93,7 @@ def get_prompt_chain():
 - 반드시 지정된 structured output schema에 맞춰 출력한다.
 - 최상위 키는 final_teams, changed, change_summary, validation_notes만 사용한다.
 - final_teams의 각 팀은 team_name, members, total_score, role_groups, leader, reason을 포함한다.
+- role_groups는 [{{"role_group": "backend", "count": 1}}] 같은 배열 형식으로 작성한다.
 - members는 학생 이름 문자열 배열로만 작성한다.
 - changed는 initial_teams에서 팀원이 바뀌었으면 true, 그대로면 false다.
 
