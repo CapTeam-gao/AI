@@ -14,6 +14,10 @@ services:
       DB_NAME: mydb
       DB_USER: root
       DB_PASSWORD: 1234
+      STUDENT_SOURCE_TABLE: students
+      STUDENT_SOURCE_ORDER_BY: id
+      ANALYSIS_RESULT_TABLE: student_analysis_results
+      MATCHING_RESULT_TABLE: team_matching_results
 
   mysql:
     image: mysql:8.0

@@ -1,11 +1,12 @@
 #총인원, 팀이름, 직군별 사람수, 팀장, 스택점수 제일 높은거 2개, 팀 배정 이유,팀마다 강점약점, 상중하
-#지금 fastapi에서 받기만 하는구조임 ai 실행되도록 해야할듯 , 그래서 매칭로직 api하나 더 만들어야함
 import json
 import re
 from pathlib import Path
 from typing import Any, Dict, List
 
 from fastapi import FastAPI, HTTPException
+
+from capteam_db import fetch_matching_result
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -15,11 +16,15 @@ app = FastAPI(title="CapTeam Matching API")
 
 
 def load_matching_output() -> Dict[str, Any]:
-    if not MATCHING_OUTPUT_PATH.exists() or MATCHING_OUTPUT_PATH.stat().st_size == 0:
-        raise HTTPException(status_code=404, detail="matching_output.json이 비어있거나 없습니다.")
+    matching_output = fetch_matching_result()
+    if matching_output:
+        return matching_output
 
-    with open(MATCHING_OUTPUT_PATH, "r", encoding="utf-8") as file:
-        return json.load(file)
+    if MATCHING_OUTPUT_PATH.exists() and MATCHING_OUTPUT_PATH.stat().st_size > 0:
+        with open(MATCHING_OUTPUT_PATH, "r", encoding="utf-8") as file:
+            return json.load(file)
+
+    raise HTTPException(status_code=404, detail="MySQL 또는 matching_output.json에 매칭 결과가 없습니다.")
 
 
 def get_final_result(matching_output: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,8 +167,10 @@ def build_member_summaries(
     return summaries
 
 
-def build_team_summary() -> Dict[str, Any]:
-    matching_output = load_matching_output()
+def build_team_summary(matching_output: Dict[str, Any] = None) -> Dict[str, Any]:
+    if matching_output is None:
+        matching_output = load_matching_output()
+
     final_result = get_final_result(matching_output)
     final_teams = get_final_teams(final_result)
 
@@ -208,3 +215,22 @@ def health():
 @app.get("/teams/summary")
 def teams_summary():
     return build_team_summary()
+
+
+@app.post("/analysis/run")
+def run_analysis():
+    from student_analysis.analysis_llm import get_analyze_stu
+
+    results = get_analyze_stu()
+    return {
+        "status": "ok",
+        "total_students": len(results),
+    }
+
+
+@app.post("/matching/run")
+def run_matching():
+    from matching_student.workflow_matching_student import run_workflow
+
+    result = run_workflow(force_rematch=True)
+    return build_team_summary(result)

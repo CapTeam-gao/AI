@@ -13,6 +13,8 @@ from langchain_core.output_parsers import StrOutputParser
 from pydantic import BaseModel, Field
 from typing import Literal
 
+from capteam_db import fetch_analysis_results, fetch_students, save_analysis_results
+
 # store = {}
 
 # def get_session_history(session_id: str):
@@ -35,12 +37,7 @@ def get_llm(model = "solar-pro3"):
 
 
 def get_data():
-    input_path = "/Users/kshi3430/CapTeam/data/student_analysis_data/students2.json"
-
-    with open(input_path, "r", encoding="utf-8") as f:
-        datas = json.load(f)  
-
-    return datas
+    return fetch_students()
 
 
 
@@ -344,7 +341,6 @@ def normalize_analysis(response, student):
 
 
 def get_analyze_stu():
-    output_path = "/Users/kshi3430/CapTeam/data/student_analysis_data/analysis_output.json"
     # 이미 분석 결과 있으면 재사용
     # 테스트할때 토큰 아낄려고 사용하는건데 나중에 진짜 완성하면 있어도 그냥 덮어씌우는 형태로 갈듯
     #원래 사이즈 안보고 그냥 파일 존재 여부만보고 안에 내용이 있든지 말든지 신경안쓰고 해서 오류가 났었는데 안에 size가 있으면 기존결과대로 유지되고
@@ -352,21 +348,19 @@ def get_analyze_stu():
     datas = get_data()
     force_reanalyze = os.getenv("FORCE_REANALYZE", "false").lower() == "true"
 
-    if not force_reanalyze and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-        print("기존 분석 결과 불러오는 중...")
+    if not force_reanalyze:
+        cached_results = fetch_analysis_results()
+        if cached_results:
+            print("기존 분석 결과를 MySQL에서 불러오는 중...")
 
-        with open(output_path, "r", encoding="utf-8") as f:
-            cached_results = json.load(f)
+            normalized_results = [
+                normalize_analysis(result, student)
+                for result, student in zip(cached_results, datas)
+            ]
 
-        normalized_results = [
-            normalize_analysis(result, student)
-            for result, student in zip(cached_results, datas)
-        ]
+            save_analysis_results(normalized_results)
 
-        with open(output_path, "w", encoding="utf-8") as f:
-            json.dump(normalized_results, f, ensure_ascii=False, indent=2)
-
-        return normalized_results
+            return normalized_results
 
     print("분석 결과 없음. 새로 분석 시작...")
     model = get_llm()
@@ -388,15 +382,12 @@ def get_analyze_stu():
         normalized_response = normalize_analysis(response, student)
         print(normalized_response)
         results.append(normalized_response)
-        with open(output_path, "w", encoding="utf-8") as f:
-            json.dump(results, f, ensure_ascii=False, indent=2)
         #리스트만들어서 답변나오면 그리스트 안에 들어가는 형식으로 이 만든걸 matching하는 llm에게 넘김.
         # 분석 결과 저장
 
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(results, f, ensure_ascii=False, indent=2)
+    save_analysis_results(results)
 
-    print(f"분석 결과 저장 완료: {output_path}")
+    print("분석 결과 MySQL 저장 완료")
 
     return results
 

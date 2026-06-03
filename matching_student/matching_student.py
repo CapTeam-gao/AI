@@ -10,8 +10,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 from typing import Dict, List
 
-ANALYSIS_OUTPUT_PATH = "/Users/kshi3430/CapTeam/data/student_analysis_data/analysis_output.json"
-MATCHING_OUTPUT_PATH = "/Users/kshi3430/CapTeam/data/student_analysis_data/matching_output.json"
+from capteam_db import fetch_analysis_results, save_matching_result as save_matching_result_to_db
 
 # skill_level을 숫자로 바꿔서 팀별 실력 합계를 계산하기 위한 기준.
 # 높음/보통/낮음만으로는 정렬과 합산을 하기 어려워서 점수화한다.
@@ -44,9 +43,9 @@ class TeamMatchingResult(BaseModel):
 
 
 def load_analysis_output_json():
-    with open(ANALYSIS_OUTPUT_PATH,'r',encoding='utf-8') as f: #r은 읽기모드로 열겠다는 뜻이고 ,as f는 f라는 변수로 받겠다는거임. 
-    #with은 작업끝나면 알아서 닫아주는 걸 해주는 거라고 생각하면 됨.
-        results = json.load(f) #f가 가리키는 json으로 읽고 dict이나 list로 변환해서 results에 저장
+    results = fetch_analysis_results()
+    if not results:
+        raise RuntimeError("MySQL에 학생 분석 결과가 없습니다. student_analysis.analysis_llm을 먼저 실행하세요.")
     return results
 
 
@@ -260,10 +259,9 @@ def create_initial_teams(students, team_size=4, team_count=None):
 
 
 def save_matching_result(result):
-    # 최종 결과를 matching_output.json으로 저장한다.
+    # 최종 결과를 MySQL에 저장한다.
     # use_ai=False이면 1차 배정안만 저장되고, use_ai=True이면 AI 최종 설명까지 저장된다.
-    with open(MATCHING_OUTPUT_PATH, "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False, indent=2)
+    save_matching_result_to_db(result)
 
 
 def validate_ai_matching_names(ai_matching, allowed_student_names):

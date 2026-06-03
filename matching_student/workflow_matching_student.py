@@ -4,10 +4,13 @@ import os
 import json
 import math
 import re
+from pathlib import Path
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"), override=True)
+
+from capteam_db import fetch_analysis_results, fetch_matching_result, save_matching_result
 #역할을 다양하게 균형 잡힌 팀 1순위 , 선호팀원 2순위 
 def get_llm(model = 'gpt-5-nano'):
     return init_chat_model(model = model)
@@ -27,9 +30,6 @@ class MatchingState(TypedDict):
 #llm_result로 llm이 제안한 팀 상태 저장하고
 #검증할때 실패하면 다시 알고리즘 보고 할수있도록 알고리즘은 그대로 두고 llm_result만 계속 덮어 씌어지면서 수정
 
-ANALYSIS_OUTPUT_PATH = "/Users/kshi3430/CapTeam/data/student_analysis_data/analysis_output.json"
-MATCHING_OUTPUT_PATH = "/Users/kshi3430/CapTeam/data/student_analysis_data/matching_output.json"
-
 # skill_level을 팀 생성용 숫자 점수로 바꾸기 위한 기준.
 # 팀 간 실력 균형을 맞추려면 "보통", "낮음" 같은 문자열보다 숫자가 다루기 편함.
 SKILL_LEVEL_SCORE = {
@@ -46,10 +46,27 @@ SKILL_LEVEL_SCORE = {
 
 #node
 def load_analysis_output_json():
-    with open(ANALYSIS_OUTPUT_PATH,'r',encoding='utf-8') as f: #r은 읽기모드로 열겠다는 뜻이고 ,as f는 f라는 변수로 받겠다는거임. 
-    #with은 작업끝나면 알아서 닫아주는 걸 해주는 거라고 생각하면 됨.
-        results = json.load(f) #f가 가리키는 json으로 읽고 dict이나 list로 변환해서 results에 저장
-    return results
+    results = fetch_analysis_results()
+    if results:
+        return results
+
+    input_path = Path(__file__).resolve().parents[1] / "data/student_analysis_data/analysis_output.json"
+    if input_path.exists() and input_path.stat().st_size > 0:
+        try:
+            with open(input_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            pass
+
+    matching_path = Path(__file__).resolve().parents[1] / "data/student_analysis_data/matching_output.json"
+    if matching_path.exists() and matching_path.stat().st_size > 0:
+        with open(matching_path, "r", encoding="utf-8") as f:
+            matching_output = json.load(f)
+        analyzed_students = matching_output.get("analyzed_students", [])
+        if analyzed_students:
+            return analyzed_students
+
+    raise RuntimeError("MySQL, analysis_output.json, matching_output.json에 학생 분석 결과가 없습니다. student_analysis.analysis_llm을 먼저 실행하세요.")
 
 #팀생성 노드
 #일단 파일불러와서 프롬포트 작성과 알고리즘으로 팀 생성 team에 저장
@@ -870,25 +887,21 @@ app = workflow.compile()
 
 
 def save_workflow_result(result):
-    with open(MATCHING_OUTPUT_PATH, "w", encoding="utf-8") as f:
+    save_matching_result(result)
+    output_path = Path(__file__).resolve().parents[1] / "data/student_analysis_data/matching_output.json"
+    with open(output_path, "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
 
 
-def load_cached_matching_result():
-    # 이미 매칭 결과 파일이 있고 내용이 있으면 기존 결과를 재사용한다.
+def load_cached_matching_result(force_rematch=False):
+    # 이미 MySQL에 매칭 결과가 있으면 기존 결과를 재사용한다.
     # FORCE_REMATCH=true 환경변수를 주면 기존 결과가 있어도 새로 매칭한다.
-    force_rematch = os.getenv("FORCE_REMATCH", "false").lower() == "true"
     if force_rematch:
         return None
-
-    if not os.path.exists(MATCHING_OUTPUT_PATH):
+    if os.getenv("FORCE_REMATCH", "false").lower() == "true":
         return None
 
-    if os.path.getsize(MATCHING_OUTPUT_PATH) == 0:
-        return None
-
-    with open(MATCHING_OUTPUT_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+    return fetch_matching_result()
 
 
 def build_initial_state() -> MatchingState:
@@ -904,13 +917,71 @@ def build_initial_state() -> MatchingState:
     }
 
 
-def run_workflow():
-    cached_result = load_cached_matching_result()
+def build_algorithm_only_result(state: MatchingState, error: Exception) -> MatchingState:
+    teams = state.get("teams") or create_initial_teams(state.get("analyzed_students", []))
+    final_teams = []
+
+    for team in teams:
+        members = team.get("members", [])
+        member_names = [member.get("name") for member in members if member.get("name")]
+        role_groups = [
+            {"role_group": role_group, "count": count}
+            for role_group, count in team.get("role_groups", {}).items()
+        ]
+        final_teams.append({
+            "team_name": team.get("team_name"),
+            "members": member_names,
+            "total_score": team.get("total_score", 0),
+            "role_groups": role_groups,
+            "leader": member_names[0] if member_names else "",
+            "reason": "LLM 호출이 실패하여 규칙 기반 점수와 역할군 균형으로 생성한 팀입니다.",
+        })
+
+    return {
+        **state,
+        "teams": teams,
+        "final_result": {
+            "final_teams": final_teams,
+            "algorithm_teams": teams,
+            "balance_result": {
+                "is_balanced": True,
+                "need_adjustment": False,
+                "next_node": "finalize_node",
+                "algorithm_result": {},
+                "llm_result": {
+                    "team_evaluations": [],
+                },
+                "errors": [],
+                "warnings": [f"LLM fallback used: {type(error).__name__}"],
+                "adjustment_request": "",
+            },
+            "team_evaluations": [],
+            "adjustment_history": [],
+            "iteration_count": state.get("iteration_count", 0),
+            "finalized_by": "algorithm_fallback",
+        },
+        "llm_result": {
+            "final_teams": final_teams,
+            "changed": False,
+            "change_summary": "LLM 호출 실패로 규칙 기반 초안을 사용했습니다.",
+            "validation_notes": f"LLM fallback used: {type(error).__name__}",
+        },
+    }
+
+
+def run_workflow(force_rematch=False):
+    cached_result = load_cached_matching_result(force_rematch=force_rematch)
     if cached_result is not None:
-        print(f"기존에 매칭이 되어있어 결과 불러오는 중: {MATCHING_OUTPUT_PATH}")
+        print("기존 매칭 결과를 MySQL에서 불러오는 중")
         return cached_result
 
-    result = app.invoke(build_initial_state())
+    initial_state = build_initial_state()
+    try:
+        result = app.invoke(initial_state)
+    except Exception as error:
+        print(f"LLM 매칭 실패. 규칙 기반 팀 배정으로 fallback합니다: {error}")
+        result = build_algorithm_only_result(initial_state, error)
+
     save_workflow_result(result)
     return result
 
@@ -926,7 +997,7 @@ if __name__ == "__main__":
 
 # load_analysis_node
 
-#   analysis_output.json을 읽어서 analyzed_students에 저장.
+#   MySQL의 분석 결과를 읽어서 analyzed_students에 저장.
 
 #   create_team_node
 
