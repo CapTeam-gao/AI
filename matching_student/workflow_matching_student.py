@@ -1,3 +1,4 @@
+#현재 팀원선호를 받아야하는데 
 from langchain.chat_models import init_chat_model
 from typing import Any,List,TypedDict,Dict
 import os
@@ -11,6 +12,27 @@ from dotenv import load_dotenv
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"), override=True)
 
 from capteam_db import fetch_analysis_results, fetch_matching_result, save_matching_result
+from capteam_preferences import (
+    breaks_preference_constraints,
+    build_preference_rejections,
+    choose_preference_aware_leader,
+    ensure_preference_profile,
+    ensure_preference_profiles,
+    preference_bonus,
+    team_preference_notes,
+)
+from capteam_traits import (
+    CORE_RISK_TRAITS,
+    TRAIT_LABELS,
+    build_leader_reason,
+    build_team_trait_risks,
+    calculate_trait_averages,
+    ensure_trait_profile,
+    get_high_trait_names,
+    get_leader_score,
+    get_low_trait_names,
+    get_trait_score,
+)
 #역할을 다양하게 균형 잡힌 팀 1순위 , 선호팀원 2순위 
 def get_llm(model = 'gpt-5-nano'):
     return init_chat_model(model = model)
@@ -48,13 +70,13 @@ SKILL_LEVEL_SCORE = {
 def load_analysis_output_json():
     results = fetch_analysis_results()
     if results:
-        return results
+        return ensure_preference_profiles([ensure_trait_profile(student) for student in results])
 
     input_path = Path(__file__).resolve().parents[1] / "data/student_analysis_data/analysis_output.json"
     if input_path.exists() and input_path.stat().st_size > 0:
         try:
             with open(input_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+                return ensure_preference_profiles([ensure_trait_profile(student) for student in json.load(f)])
         except json.JSONDecodeError:
             pass
 
@@ -64,7 +86,7 @@ def load_analysis_output_json():
             matching_output = json.load(f)
         analyzed_students = matching_output.get("analyzed_students", [])
         if analyzed_students:
-            return analyzed_students
+            return ensure_preference_profiles([ensure_trait_profile(student) for student in analyzed_students])
 
     raise RuntimeError("MySQL, analysis_output.json, matching_output.json에 학생 분석 결과가 없습니다. student_analysis.analysis_llm을 먼저 실행하세요.")
 
@@ -82,14 +104,21 @@ def parse_stack_score(stack_score):
 
 #여기 수정해야함
 #여기 점수 계산 로직 이거 수정해야할듯 지금 구조가 너무 점수에 의존하는 구조인데 지금 그냥 평균내거나 곱해서 그냥 점수 계산하니까 성능이 좀 많이 안좋아짐.
-def get_student_score(student):
-    # 학생 한 명의 매칭용 점수 계산.
+def get_technical_score(student):
+    # 학생 한 명의 기술 점수 계산.
     # skill_level을 큰 기준으로 보고, stack_score 평균을 보조 점수로 더함.
     level_score = SKILL_LEVEL_SCORE.get(student.get('skill_level'),1)
     #ex skill_level이 보통이면 skill_level_score에서 보통에 value가 2여서 2를 저장
     stack_score = parse_stack_score(student.get('stack_score',""))
     #stack_score가져와서 함수써서 숫자만 추출함 없으면 빈 문자열.
     return level_score * 10 + stack_score
+
+
+def get_student_score(student):
+    # 최종 매칭 점수는 기술 70%, 성향 30%로 계산한다.
+    technical_score = get_technical_score(student)
+    trait_score = get_trait_score(student)
+    return technical_score * 0.7 + trait_score * 0.3
 
 
 
@@ -114,15 +143,32 @@ def get_role_group(role):
 def make_student_summary(student):
     # 팀 생성에 필요한 정보만 추린 학생 요약 데이터.
     # 원본 분석 결과 전체를 teams에 넣으면 너무 길어져서 핵심 필드만 저장함.
+    student = ensure_preference_profile(ensure_trait_profile(student))
+    technical_score = round(get_technical_score(student), 2)
+    trait_score = round(get_trait_score(student), 2)
+    matching_score = round(get_student_score(student), 2)
     return {
         "name": student.get("name"),
         "skill_level": student.get("skill_level"),
-        "score": round(get_student_score(student), 2), #함수에서 skill_level과 stack_level합친 점수를 score에 저장 round = 반올림함수
+        "score": matching_score,
+        "technical_score": technical_score,
+        "trait_score": trait_score,
         "role": student.get("role"), #학생이 원하는 역할 
         "role_group": get_role_group(student.get("role")), #팀에서 할 역할
         "strength": student.get("strength"),
         "weakness": student.get("weakness"),
-        "suggestion": student.get("suggestion"), 
+        "suggestion": student.get("suggestion"),
+        "personality_scores": student.get("personality_scores", {}),
+        "development_scores": student.get("development_scores", {}),
+        "personality_summary": student.get("personality_summary", {}),
+        "development_summary": student.get("development_summary", {}),
+        "matching_traits": student.get("matching_traits", {}),
+        "leader_score": get_leader_score(student),
+        "low_traits": student.get("matching_traits", {}).get("low_traits", []),
+        "high_traits": student.get("matching_traits", {}).get("high_traits", []),
+        "preferred_members": student.get("preferred_members", []),
+        "wants_leader": student.get("wants_leader", False),
+        "matching_preferences": student.get("matching_preferences", {}),
     }
 
 
@@ -153,11 +199,57 @@ def choose_team_for_student(teams, student, max_team_size):
         if len(team["members"]) < max_team_size #팀에 members수가 최대 팀원 양보다 적으면
     ]
 
+    def trait_penalty(team):
+        members = team.get("members", [])
+        low_traits = get_low_trait_names(student)
+        high_traits = get_high_trait_names(student)
+        member_low_traits = set().union(*(get_low_trait_names(member) for member in members)) if members else set()
+        member_high_traits = set().union(*(get_high_trait_names(member) for member in members)) if members else set()
+        repeated_low_count = len(low_traits & member_low_traits)
+        complemented_count = len((low_traits & member_high_traits) | (high_traits & member_low_traits))
+        return repeated_low_count - complemented_count
+
+    def safe_preference_bonus(team):
+        members = team.get("members", [])
+        bonus = preference_bonus(student, members)
+        if not bonus:
+            return 0
+        projected_members = members + [student]
+        if breaks_preference_constraints(projected_members):
+            return 0
+
+        projected_scores = []
+        projected_sizes = []
+        for candidate_team in teams:
+            candidate_score = candidate_team["total_score"]
+            candidate_size = len(candidate_team["members"])
+            if candidate_team is team:
+                candidate_score += student["score"]
+                candidate_size += 1
+            projected_scores.append(candidate_score)
+            projected_sizes.append(candidate_size)
+
+        # 아직 빈 팀이 있는 초기 배치 단계에서는 최종 균형을 만들 여지가 있으므로
+        # 점수/인원 gap 때문에 선호 보너스를 너무 일찍 끄지 않는다.
+        if projected_scores and projected_sizes and min(projected_sizes) > 0:
+            score_gap = max(projected_scores) - min(projected_scores)
+            average_score = sum(projected_scores) / len(projected_scores)
+            max_score_gap = max(8, average_score * 0.13) if average_score else 0
+            if score_gap > max_score_gap:
+                return 0
+
+        if projected_sizes and min(projected_sizes) > 0 and max(projected_sizes) - min(projected_sizes) > 1:
+            return 0
+
+        return bonus
+
     return min(
         available_teams,
         key=lambda team: ( #tuple이여서 위에서 아래순으로 우선순위를 따짐
+            -safe_preference_bonus(team),
             team["total_score"], #팀 총합 스코어, 팀 총점이 가장 낮은 팀 우선.
             team["role_groups"].get(role_group, 0),#팀에서 역할, 해당 역할 그룹 인원이 적은 팀 우선.
+            trait_penalty(team),
             len(team["members"]), #팀 인원 ,팀 인원이 적은 팀 우선.
         ),
     )
@@ -198,6 +290,14 @@ def create_initial_teams(analyzed_students, team_size=4, team_count=None):
 
     for team in teams: #모든 팀 순회해서
         team["total_score"] = round(team["total_score"], 2)
+        leader = choose_preference_aware_leader(team["members"])
+        team["leader"] = leader.get("name", "")
+        team["leader_score"] = get_leader_score(leader) if leader else 0
+        team["leader_reason"] = build_leader_reason(leader)
+        team["personality_averages"] = calculate_trait_averages(team["members"], "personality_scores")
+        team["development_averages"] = calculate_trait_averages(team["members"], "development_scores")
+        team["trait_risks"] = build_team_trait_risks(team["members"])
+        team["preference_notes"] = team_preference_notes(team["members"])
     #팀 점수를 소수점 둘째 자리까지 반올림.
     return teams
 
@@ -245,6 +345,8 @@ def get_matching_prompt_chain():
 - 알고리즘 초안을 기본 정답으로 보고, 자연어 분석상 명확히 더 좋은 조합이 있을 때만 최소한으로 보정한다.
 - 보정이 필요하지 않으면 initial_teams를 그대로 유지하고 이유만 설명한다.
 - 팀별 총점, 역할 다양성, 낮음 학생의 지원 가능성을 함께 본다.
+- 성격 성향과 개발 성향 점수는 팀별 평균 균형과 상호 보완 관계를 판단하는 데 사용한다.
+- preferred_members는 강하게 고려하되, 점수/역할군/성향 균형을 깨면 선호를 분리할 수 있다.
 
 매칭 기준:
 - 한 학생은 정확히 한 팀에만 배정한다.
@@ -254,6 +356,10 @@ def get_matching_prompt_chain():
 - 낮음 학생은 가능하면 보통 또는 높음 학생과 함께 둔다.
 - 같은 role_group만으로 구성된 팀은 가능하면 피한다.
 - suggestion, strength, weakness를 활용해 협업 시너지를 판단한다.
+- communication, responsibility, implementation, problemSolving이 낮은 학생은 해당 점수가 높은 학생과 함께 두는 것을 선호한다.
+- 팀장 추천은 leadership, planning, problemSolving 조합인 leader_score를 우선한다.
+- 팀 안에 wants_leader=true인 학생이 있으면 그 학생들 중 leader_score와 technical_score가 높은 학생을 팀장으로 추천한다.
+- preferred_members를 떨어뜨린 경우에는 균형을 위해 분리했다는 이유를 reason에 자연스럽게 포함한다.
 
 계산 규칙:
 - 점수는 student_analysis 또는 initial_teams에 있는 score 값만 사용한다.
@@ -275,7 +381,7 @@ def get_matching_prompt_chain():
 		- changed는 initial_teams에서 팀원이 바뀌었으면 true, 그대로면 false다.
         - reason에는 팀원이 함께 배정된 구체적인 이유를 작성한다.
         - reason에서 '초안 유지', '총점 변화 없음', '점수 차이가 작음', '구성이 안정적임', '균형이 유지됨' 같은 추상적 검증 문구만 쓰지 않는다.
-        - reason은 학생의 역할, 구현 경험, 강점과 약점 보완 관계를 직접 언급해야 한다.
+        - reason은 학생의 역할, 구현 경험, 강점과 약점 보완 관계, 성향 보완 관계를 직접 언급해야 한다.
 """
 
     user_prompt = """
@@ -402,6 +508,7 @@ def calculate_team_status(team, student_lookup):
     role_groups = {} #역할군 분포
     skill_levels = {} #실력 레벨 분포
     unknown_names = [] #분석 데이터에 없는이름
+    members = []
 
     #팀원이름 검사
     for name in member_names: 
@@ -410,6 +517,7 @@ def calculate_team_status(team, student_lookup):
             unknown_names.append(name)
             continue
 
+        members.append(student)
         total_score += student["score"] #for문 돌면서 점수 더함.
         role_group = student["role_group"] #역할 넣어주기
         skill_level = student["skill_level"] 
@@ -424,6 +532,10 @@ def calculate_team_status(team, student_lookup):
         "role_groups": role_groups,
         "skill_levels": skill_levels,
         "unknown_names": unknown_names,
+        "leader_score": round(max([get_leader_score(member) for member in members] or [0]), 2),
+        "personality_averages": calculate_trait_averages(members, "personality_scores"),
+        "development_averages": calculate_trait_averages(members, "development_scores"),
+        "trait_risks": build_team_trait_risks(members),
     }
 
 
@@ -464,6 +576,19 @@ def validation_balance_team(candidate_result, analyzed_students, base_teams=None
         if len(team_status["role_groups"]) == 1 and team_status["member_count"] > 1:
             team_warnings.append("한 가지 역할군으로만 구성된 팀입니다.")
 
+        for trait in CORE_RISK_TRAITS:
+            trait_average = (
+                team_status["personality_averages"].get(trait)
+                or team_status["development_averages"].get(trait)
+            )
+            if trait_average is not None and trait_average < 3:
+                team_warnings.append(f"{TRAIT_LABELS[trait]} 평균이 3 미만입니다.")
+
+        if team_status["leader_score"] < 4.0:
+            team_warnings.append("leader_score 4.0 이상 팀장 후보가 없습니다.")
+
+        team_warnings.extend(team_status["trait_risks"])
+
         reported_score = team.get("total_score")
         if reported_score is not None:
             try:
@@ -483,6 +608,10 @@ def validation_balance_team(candidate_result, analyzed_students, base_teams=None
             "total_score": team_status["total_score"],
             "role_groups": team_status["role_groups"],
             "skill_levels": team_status["skill_levels"],
+            "leader_score": team_status["leader_score"],
+            "personality_averages": team_status["personality_averages"],
+            "development_averages": team_status["development_averages"],
+            "trait_risks": team_status["trait_risks"],
         })
 
         errors.extend([f"{team_status['team_name']}: {error}" for error in team_errors])
@@ -704,6 +833,8 @@ def get_adjust_team_prompt_chain():
     - 팀 총점 차이를 크게 악화시키지 않는다.
     - 낮음 학생은 가능하면 보통 또는 높음 학생과 함께 둔다.
     - 같은 role_group만으로 구성된 팀은 가능하면 피한다.
+    - preferred_members는 강하게 고려하되, 점수/역할군/성향 균형을 깨면 선호를 분리할 수 있다.
+    - 팀 안에 wants_leader=true인 학생이 있으면 그 학생들 중 leader_score와 technical_score가 높은 학생을 팀장으로 추천한다.
     - adjustment_history와 같은 수정 패턴을 반복하지 않는다.
 
     반영해야 할 정보:
@@ -810,6 +941,35 @@ def adjust_team_node(state: MatchingState) -> Dict[str, Any]:
     }
 
 
+def enrich_final_teams(final_teams, analyzed_students):
+    student_lookup = build_student_lookup(analyzed_students)
+    enriched_teams = []
+
+    for team in get_candidate_teams(final_teams):
+        member_names = get_member_names(team)
+        members = [
+            student_lookup[name]
+            for name in member_names
+            if name in student_lookup
+        ]
+        leader = choose_preference_aware_leader(members)
+        enriched_team = dict(team)
+        enriched_team["leader"] = leader.get("name", enriched_team.get("leader", ""))
+        enriched_team["leader_reason"] = build_leader_reason(leader)
+        enriched_team["personality_averages"] = calculate_trait_averages(members, "personality_scores")
+        enriched_team["development_averages"] = calculate_trait_averages(members, "development_scores")
+        enriched_team["trait_risks"] = build_team_trait_risks(members)
+        enriched_team["preference_notes"] = team_preference_notes(members)
+        enriched_teams.append(enriched_team)
+
+    if isinstance(final_teams, dict):
+        result = dict(final_teams)
+        result["final_teams"] = enriched_teams
+        return result
+
+    return enriched_teams
+
+
 
 
 
@@ -832,12 +992,21 @@ def finalize_node(state: MatchingState) -> Dict[str, Any]:
     else:
         finalized_by = "manual_finalize"
 
+    final_teams = enrich_final_teams(
+        state.get("llm_result") or state.get("teams", []),
+        state.get("analyzed_students", []),
+    )
+
     final_result = {
-        "final_teams": state.get("llm_result") or state.get("teams", []),
+        "final_teams": final_teams,
         "algorithm_teams": state.get("teams", []),
         "balance_result": balance_result,
         "team_evaluations": state.get("team_evaluations", []),
         "adjustment_history": state.get("adjustment_history", []),
+        "preference_rejections": build_preference_rejections(
+            final_teams,
+            state.get("analyzed_students", []),
+        ),
         "iteration_count": iteration_count,
         "finalized_by": finalized_by,
     }
@@ -924,6 +1093,7 @@ def build_algorithm_only_result(state: MatchingState, error: Exception) -> Match
     for team in teams:
         members = team.get("members", [])
         member_names = [member.get("name") for member in members if member.get("name")]
+        leader = choose_preference_aware_leader(members)
         role_groups = [
             {"role_group": role_group, "count": count}
             for role_group, count in team.get("role_groups", {}).items()
@@ -933,8 +1103,13 @@ def build_algorithm_only_result(state: MatchingState, error: Exception) -> Match
             "members": member_names,
             "total_score": team.get("total_score", 0),
             "role_groups": role_groups,
-            "leader": member_names[0] if member_names else "",
-            "reason": "LLM 호출이 실패하여 규칙 기반 점수와 역할군 균형으로 생성한 팀입니다.",
+            "leader": leader.get("name", ""),
+            "leader_reason": build_leader_reason(leader),
+            "personality_averages": team.get("personality_averages", {}),
+            "development_averages": team.get("development_averages", {}),
+            "trait_risks": team.get("trait_risks", []),
+            "preference_notes": team.get("preference_notes", []),
+            "reason": "LLM 호출이 실패하여 규칙 기반 점수, 역할군, 성향 균형으로 생성한 팀입니다.",
         })
 
     return {
@@ -957,6 +1132,10 @@ def build_algorithm_only_result(state: MatchingState, error: Exception) -> Match
             },
             "team_evaluations": [],
             "adjustment_history": [],
+            "preference_rejections": build_preference_rejections(
+                final_teams,
+                state.get("analyzed_students", []),
+            ),
             "iteration_count": state.get("iteration_count", 0),
             "finalized_by": "algorithm_fallback",
         },

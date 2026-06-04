@@ -11,9 +11,11 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder , Few
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_core.output_parsers import StrOutputParser
 from pydantic import BaseModel, Field
-from typing import Literal
+from typing import Any, Dict, Literal
 
 from capteam_db import fetch_analysis_results, fetch_students, save_analysis_results
+from capteam_preferences import ensure_preference_profile
+from capteam_traits import ensure_trait_profile
 
 # store = {}
 
@@ -62,6 +64,8 @@ def get_prompt_chain():
 없는 데이터를 만들어서 절대 사용하지 마라.
 skill_evidence는 알고리즘이 계산한 참고용 근거 점수이며 최종 판정이 아니다.
 최종 skill_level과 stack_score는 student_data의 experience를 우선으로 보고 판단하라.
+student_data에 성격/개발 성향 점수가 있으면 협업 방식과 추천 역할 설명에만 참고하고,
+기술 숙련도 점수를 부풀리는 근거로 사용하지 마라.
 
 평가 원칙:
 - 기술 이름을 안다고 높은 점수를 주지 마라.
@@ -336,8 +340,9 @@ def normalize_analysis(response, student):
             f"{result.get('reason', '')}\n\n{correction}"
         )
 
-    # 최종 보정된 분석 결과 반환
-    return result
+    # 설문 성향 점수는 LLM 응답과 무관하게 원본 입력 기준으로 정규화해서 항상 포함한다.
+    trait_result = ensure_trait_profile(result, source=student)
+    return ensure_preference_profile({**student, **trait_result})
 
 
 def get_analyze_stu():
