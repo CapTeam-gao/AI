@@ -1,4 +1,5 @@
 #총인원, 팀이름, 직군별 사람수, 팀장, 스택점수 제일 높은거 2개, 팀 배정 이유,팀마다 강점약점, 상중하
+#팀 재생성 프롬포트 넣어서 팀 재생성 누르면 가능하도록 최종 팀에서 재생성 프롬포트넣어서 llm이 수정하도록 하기.
 import json
 import re
 from pathlib import Path
@@ -7,6 +8,14 @@ from typing import Any, Dict, List
 from fastapi import FastAPI, HTTPException
 
 from capteam_db import fetch_matching_result
+from capteam_traits import (
+    build_leader_reason,
+    build_team_trait_risks,
+    calculate_trait_averages,
+    choose_team_leader,
+    ensure_trait_profile,
+    get_leader_score,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -68,7 +77,7 @@ def parse_stack_score(stack_score: str) -> List[Dict[str, Any]]:
 
 def build_student_map(matching_output: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     return {
-        student.get("name"): student
+        student.get("name"): ensure_trait_profile(student)
         for student in matching_output.get("analyzed_students", [])
         if student.get("name")
     }
@@ -154,14 +163,24 @@ def build_member_summaries(
     for member_name in member_names:
         member = member_map.get(member_name) or student_map.get(member_name, {"name": member_name})
         student = student_map.get(member_name, {})
+        enriched_member = ensure_trait_profile({**student, **member})
         summaries.append({
-            "name": member.get("name"),
-            "role": member.get("role"),
-            "role_group": member.get("role_group"),
-            "skill_level": member.get("skill_level"),
-            "score": member.get("score"),
+            "name": enriched_member.get("name"),
+            "role": enriched_member.get("role"),
+            "role_group": enriched_member.get("role_group"),
+            "skill_level": enriched_member.get("skill_level"),
+            "score": enriched_member.get("score"),
+            "technical_score": enriched_member.get("technical_score"),
+            "trait_score": enriched_member.get("trait_score"),
             "strength": student.get("strength", ""),
             "top_stack_scores": get_student_top_stack_scores(student),
+            "personality_scores": enriched_member.get("personality_scores", {}),
+            "development_scores": enriched_member.get("development_scores", {}),
+            "personality_summary": enriched_member.get("personality_summary", {}),
+            "development_summary": enriched_member.get("development_summary", {}),
+            "leader_score": get_leader_score(enriched_member),
+            "low_traits": enriched_member.get("matching_traits", {}).get("low_traits", []),
+            "high_traits": enriched_member.get("matching_traits", {}).get("high_traits", []),
         })
 
     return summaries
@@ -186,17 +205,38 @@ def build_team_summary(matching_output: Dict[str, Any] = None) -> Dict[str, Any]
         algorithm_members = algorithm_team.get("members", [])
         evaluation = evaluation_map.get(team_name, {})
         member_summaries = build_member_summaries(member_names, algorithm_members, student_map)
+        leader_member = choose_team_leader(member_summaries)
 
         teams.append({
             "team_name": team_name,
             "total_people": len(member_names),
             "role_counts": final_team.get("role_groups", []),
-            "leader": final_team.get("leader"),
+            "leader": final_team.get("leader") or leader_member.get("name"),
+            "leader_reason": (
+                final_team.get("leader_reason")
+                or evaluation.get("leader_reason")
+                or build_leader_reason(leader_member)
+            ),
             "top_stack_scores": get_top_stack_scores(member_names, student_map),
             "matching_reason": evaluation.get("matching_reason") or final_team.get("reason", ""),
             "strengths": evaluation.get("strengths", ""),
             "weaknesses": evaluation.get("risks", ""),
             "skill_level_counts": get_skill_level_counts(member_summaries),
+            "personality_averages": (
+                final_team.get("personality_averages")
+                or evaluation.get("personality_averages")
+                or calculate_trait_averages(member_summaries, "personality_scores")
+            ),
+            "development_averages": (
+                final_team.get("development_averages")
+                or evaluation.get("development_averages")
+                or calculate_trait_averages(member_summaries, "development_scores")
+            ),
+            "trait_risks": (
+                final_team.get("trait_risks")
+                or evaluation.get("trait_risks")
+                or build_team_trait_risks(member_summaries)
+            ),
             "members": member_summaries,
         })
 
@@ -234,3 +274,4 @@ def run_matching():
 
     result = run_workflow(force_rematch=True)
     return build_team_summary(result)
+#uvicorn api.main:app --reload
