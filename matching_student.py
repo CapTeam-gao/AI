@@ -10,8 +10,8 @@ from pydantic import BaseModel, Field
 from typing import Dict, List
 from team_optimizer import create_optimized_teams # 최적화용 optimizer 파일
 
-ANALYSIS_OUTPUT_PATH = "/Users/chxe_01/Documents/gao/analysis_output.json"
-MATCHING_OUTPUT_PATH = "/Users/chxe_01/Documents/gao/matching_output.json"
+ANALYSIS_OUTPUT_PATH = "/Users/chxe_01/Documents/gao/gao/analysis_output.json"
+MATCHING_OUTPUT_PATH = "/Users/chxe_01/Documents/gao/gao/matching_output.json"
 
 # skill_level을 숫자로 바꿔서 팀별 실력 합계를 계산하기 위한 기준.
 # 높음/보통/낮음만으로는 정렬과 합산을 하기 어려워서 점수화한다.
@@ -97,6 +97,15 @@ def get_prompt_chain():
 - members는 학생 이름 문자열 배열로만 작성한다.
 - changed는 initial_teams에서 팀원이 바뀌었으면 true, 그대로면 false다.
 - change_summary return only korean
+
+
+
+기타 반영 사항 :
+- 절대 학생의 role_group을 변경하지 마라.
+- 절대 새로운 팀원을 추가하지 마라.
+- 절대 기존 팀 배정을 수정하지 마라.
+- 입력 JSON에 있는 내용만 설명하라.
+- reason을 간추려 말 하지 말 것, 교사들이 매칭된 팀에 대해 납득이 갈 이유를 적어라.
 
 allowed_student_names:
 {allowed_student_names}

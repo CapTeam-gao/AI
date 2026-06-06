@@ -35,10 +35,93 @@ def create_optimized_teams(student_summaries, team_size=4):
         model.Add(member_count >= min_team_size)
         model.Add(member_count <= max_team_size)
 
+    
+    
+    # 역할군 정보 추출 (frontend, backend, ai_data, game 등)
+
     scores = [
         int(student["score"] * 100)
         for student in student_summaries
     ]
+
+    def normalize_role(role: str) -> str:
+        role = role.lower()
+
+        if "frontend" in role:
+            return "Frontend"
+
+        if "unity" in role or "game" in role:
+            return "Game"
+
+        if "ai" in role:
+            return "AI"
+
+        if "데이터" in role or "머신러닝" in role:
+            return "AI"
+
+        if "backend" in role or "백엔드" in role:
+            return "Backend"
+
+        return "Unknown"
+    
+    role_groups = [
+        normalize_role(student.get("role", ""))
+        for student in student_summaries
+    ]
+
+    # 균형 배치를 적용할 핵심 역할군
+    core_roles = ["Frontend", "Backend", "AI"]
+
+    # 역할군 편차 패널티 저장
+    role_penalties = []
+
+    for role in core_roles:
+
+        role_counts = []
+
+        for j in range(team_count):
+
+            role_count = model.NewIntVar(
+                0,
+                team_size,
+                f"{role}_count_{j}"
+            )
+
+            model.Add(
+                role_count == sum(
+                    x[i, j]
+                    for i in range(student_count)
+                    if role_groups[i] == role
+                )
+            )
+
+            role_counts.append(role_count)
+
+        role_max = model.NewIntVar(
+            0,
+            team_size,
+            f"{role}_max"
+        )
+
+        role_min = model.NewIntVar(
+            0,
+            team_size,
+            f"{role}_min"
+        )
+
+        model.AddMaxEquality(role_max, role_counts)
+        model.AddMinEquality(role_min, role_counts)
+
+        # 역할군 최대 인원 팀과 최소 인원 팀의 차이
+        penalty = model.NewIntVar(
+            0,
+            team_size,
+            f"{role}_penalty"
+        )
+
+        model.Add(penalty == role_max - role_min)
+
+        role_penalties.append(penalty)
 
     team_scores = []
 
@@ -92,7 +175,15 @@ def create_optimized_teams(student_summaries, team_size=4):
         score_gap == max_score - min_score
     )
 
-    model.Minimize(score_gap)
+    # 역할군 분포가 한쪽 팀에 몰리지 않도록 패널티 적용 (ex: FE 5 혹은 BE 4, AI 1 같은 상황 대비)
+    total_role_penalty = sum(role_penalties)
+
+    # 1순위: 팀 점수 균형
+    # 2순위: FE/BE/AI 역할군 균형
+    model.Minimize(
+        score_gap * 100
+        + total_role_penalty * 10
+    )
 
     solver = cp_model.CpSolver()
 
@@ -110,7 +201,11 @@ def create_optimized_teams(student_summaries, team_size=4):
 
         members = []
         total_score = 0
+
+        # 추후 게임 팀 생성을 위해 게임 개발자 수 집계
+        game_count = 0
         role_groups = {}
+
 
         for i in range(student_count):
 
@@ -122,7 +217,10 @@ def create_optimized_teams(student_summaries, team_size=4):
 
                 total_score += student["score"]
 
-                role = student["role_group"]
+                role = normalize_role(student.get("role", ""))
+                # 게임 역할 인원 수 계산
+                if role == "Game":
+                    game_count += 1
 
                 role_groups[role] = (
                     role_groups.get(role, 0)
@@ -134,6 +232,7 @@ def create_optimized_teams(student_summaries, team_size=4):
             "members": members,
             "total_score": round(total_score, 2),
             "role_groups": role_groups,
+            "game_count": game_count,
         })
 
     return teams
