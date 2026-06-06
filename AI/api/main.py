@@ -276,3 +276,4 @@ def run_matching():
     result = run_workflow(force_rematch=True)
     return build_team_summary(result)
 #uvicorn api.main:app --reload
+git commit -m "feat : Upstage 매칭 적용 및 fastapi 팀 요약 응답 필드 정리"
