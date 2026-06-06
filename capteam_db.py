@@ -13,10 +13,11 @@ def _env(name: str, default: str) -> str:
 
 def get_connection():
     return pymysql.connect(
+        #위에 _env함수를 써서 DB_HOST라는 환경변수가 설정되어 있는지 확인 없으면 지정해준 값으로 근데 docker나 sever에서 환경변수를 주면 그값으로 db에 연결
         host=_env("DB_HOST", "localhost"),
         port=int(_env("DB_PORT", "3307")),
         user=_env("DB_USER", "root"),
-        password=_env("DB_PASSWORD", "1234"),
+        password=_env("DㅁB_PASSWORD", "1234"),
         database=_env("DB_NAME", "mydb"),
         charset="utf8mb4",
         cursorclass=DictCursor,
@@ -27,11 +28,11 @@ def get_connection():
 def _json_load(value: Any) -> Any:
     if value is None:
         return None
-    if isinstance(value, (dict, list)):
-        return value
-    if isinstance(value, (bytes, bytearray)):
+    if isinstance(value, (dict, list)): #isinstance : 객체가 어떤 타입인지 확인하는 함수.
+        return value #dict이나 list면 변환할 필요없이 그냥 반환
+    if isinstance(value, (bytes, bytearray)): #bytes, bytearray면 디코딩해서 value에저장
         value = value.decode("utf-8")
-    if isinstance(value, str):
+    if isinstance(value, str): #문자열이면 앞뒤 공백제거
         value = value.strip()
         if not value:
             return None
@@ -49,7 +50,7 @@ def _as_list(value: Any) -> List[Any]:
     if isinstance(loaded, list):
         return loaded
     if isinstance(loaded, dict):
-        return list(loaded.keys())
+        return list(loaded.keys()) #딕이면 키만 뽑음
     if isinstance(loaded, str):
         return [item.strip() for item in loaded.split(",") if item.strip()]
     return [loaded]
