@@ -3,10 +3,10 @@
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from dotenv import load_dotenv
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException
 
 from capteam_db import fetch_matching_result
 from capteam_traits import (
@@ -23,6 +23,66 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 MATCHING_OUTPUT_PATH = BASE_DIR / "data/student_analysis_data/matching_output.json"
 
 app = FastAPI(title="CapTeam Matching API")
+
+
+def _first_present(data: Dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in data and data.get(key) is not None:
+            return data.get(key)
+    return None
+
+
+def _copy_trait_scores(target: Dict[str, Any], source: Dict[str, Any]) -> None:
+    personality = source.get("personality_scores") or source.get("personalityScores") or {}
+    development = source.get("development_scores") or source.get("developmentScores") or {}
+
+    target.update({
+        "communication": _first_present(source, "communication") or personality.get("communication"),
+        "responsibility": _first_present(source, "responsibility") or personality.get("responsibility"),
+        "collaboration": _first_present(source, "collaboration") or personality.get("collaboration"),
+        "flexibility": _first_present(source, "flexibility") or personality.get("flexibility"),
+        "emotionalStability": (
+            _first_present(source, "emotionalStability", "emotional_stability")
+            or personality.get("emotionalStability")
+            or personality.get("emotional_stability")
+        ),
+        "leadership": _first_present(source, "leadership") or development.get("leadership"),
+        "problemSolving": (
+            _first_present(source, "problemSolving", "problem_solving")
+            or development.get("problemSolving")
+            or development.get("problem_solving")
+        ),
+        "implementation": _first_present(source, "implementation") or development.get("implementation"),
+        "learningAbility": (
+            _first_present(source, "learningAbility", "learning_ability")
+            or development.get("learningAbility")
+            or development.get("learning_ability")
+        ),
+        "planning": _first_present(source, "planning") or development.get("planning"),
+    })
+
+
+def normalize_request_students(students: Optional[List[Dict[str, Any]]]) -> Optional[List[Dict[str, Any]]]:
+    if students is None:
+        return None
+
+    normalized_students = []
+    for student in students:
+        normalized = dict(student)
+        normalized["name"] = _first_present(student, "name", "studentName")
+        normalized["role"] = _first_present(student, "role", "studentRole")
+        normalized["stack"] = _first_present(student, "stack", "skill", "skills") or []
+        normalized["experience"] = _first_present(student, "experience", "experiences") or []
+        normalized["wants_leader"] = _first_present(student, "wants_leader", "wantsLeader")
+        normalized["preferred_members"] = (
+            _first_present(student, "preferred_members", "preferredMembers", "preferredTeammates")
+            or []
+        )
+        normalized["grade"] = _first_present(student, "grade")
+        _copy_trait_scores(normalized, student)
+        normalized_students.append(normalized)
+
+    return normalized_students
 
 
 def load_matching_output() -> Dict[str, Any]:
@@ -258,10 +318,10 @@ def teams_summary():
 
 
 @app.post("/analysis/run")
-def run_analysis():
+def run_analysis(students: Optional[List[Dict[str, Any]]] = Body(default=None)):
     from student_analysis.analysis_llm import get_analyze_stu
 
-    results = get_analyze_stu()
+    results = get_analyze_stu(normalize_request_students(students))
     return {
         "status": "ok",
         "total_students": len(results),
@@ -269,9 +329,14 @@ def run_analysis():
 
 
 @app.post("/matching/run")
-def run_matching():
+def run_matching(students: Optional[List[Dict[str, Any]]] = Body(default=None)):
+    from student_analysis.analysis_llm import get_analyze_stu
     # from matching_student.workflow_matching_student import run_workflow #open_ai_api로 할때 이거 밑에 주석치고 이거하셈
     from matching_student.upstage_matching import run_workflow
+
+    request_students = normalize_request_students(students)
+    if request_students is not None:
+        get_analyze_stu(request_students)
 
     result = run_workflow(force_rematch=True)
     return build_team_summary(result)
