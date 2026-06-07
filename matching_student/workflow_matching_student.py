@@ -138,14 +138,15 @@ def get_role_group(role):
     if any(keyword in role_text for keyword in ["unity", "게임"]):
         return "game"
     return "etc"
+#이거 고쳐야함. 분야가 이거 밖에 없음 더 추가해야할듯
 
 
 def make_student_summary(student):
     # 팀 생성에 필요한 정보만 추린 학생 요약 데이터.
     # 원본 분석 결과 전체를 teams에 넣으면 너무 길어져서 핵심 필드만 저장함.
     student = ensure_preference_profile(ensure_trait_profile(student))
-    technical_score = round(get_technical_score(student), 2)
-    trait_score = round(get_trait_score(student), 2)
+    technical_score = round(get_technical_score(student), 2) #기술 점수
+    trait_score = round(get_trait_score(student), 2) #성향 점수
     matching_score = round(get_student_score(student), 2)
     return {
         "name": student.get("name"),

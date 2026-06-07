@@ -11,7 +11,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder , Few
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_core.output_parsers import StrOutputParser
 from pydantic import BaseModel, Field
-from typing import Any, Dict, Literal
+from typing import Any, Dict, List, Literal, Optional
 
 from capteam_db import fetch_analysis_results, fetch_students, save_analysis_results
 from capteam_preferences import ensure_preference_profile
@@ -222,6 +222,7 @@ def _count_implementation_evidence(student):
         
     )
 
+
 def _count_words(text, words):
     return sum(1 for word in words if word.lower() in text)
 
@@ -345,15 +346,18 @@ def normalize_analysis(response, student):
     return ensure_preference_profile({**student, **trait_result})
 
 
-def get_analyze_stu():
+def get_analyze_stu(students: Optional[List[Dict[str, Any]]] = None):
     # 이미 분석 결과 있으면 재사용
     # 테스트할때 토큰 아낄려고 사용하는건데 나중에 진짜 완성하면 있어도 그냥 덮어씌우는 형태로 갈듯
     #원래 사이즈 안보고 그냥 파일 존재 여부만보고 안에 내용이 있든지 말든지 신경안쓰고 해서 오류가 났었는데 안에 size가 있으면 기존결과대로 유지되고
     #size가 없으면 새로 분석하는그런 로직임.
-    datas = get_data()
+    datas = students if students is not None else get_data()
     force_reanalyze = os.getenv("FORCE_REANALYZE", "false").lower() == "true"
 
-    if not force_reanalyze:
+    if not datas:
+        raise RuntimeError("분석할 학생 데이터가 없습니다.")
+
+    if students is None and not force_reanalyze:
         cached_results = fetch_analysis_results()
         if cached_results:
             print("기존 분석 결과를 MySQL에서 불러오는 중...")
