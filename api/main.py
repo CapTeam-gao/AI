@@ -208,7 +208,38 @@ def get_display_role_group(role: str) -> str:
     return "etc"
 
 
-def build_role_counts(member_names: List[str], student_map: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+def normalize_role_counts(role_groups: Any) -> List[Dict[str, Any]]:
+    if isinstance(role_groups, list):
+        return [
+            {
+                "role_group": item.get("role_group"),
+                "count": int(item.get("count", 0) or 0),
+            }
+            for item in role_groups
+            if isinstance(item, dict) and item.get("role_group")
+        ]
+
+    if isinstance(role_groups, dict):
+        return [
+            {"role_group": role_group, "count": int(count or 0)}
+            for role_group, count in role_groups.items()
+            if role_group
+        ]
+
+    return []
+
+
+def build_role_counts(
+    member_names: List[str],
+    student_map: Dict[str, Dict[str, Any]],
+    final_team: Optional[Dict[str, Any]] = None,
+    algorithm_team: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, Any]]:
+    for source in (final_team, algorithm_team):
+        role_counts = normalize_role_counts((source or {}).get("role_groups"))
+        if role_counts:
+            return role_counts
+
     counts: Dict[str, int] = {}
     for member_name in member_names:
         role_group = get_display_role_group(student_map.get(member_name, {}).get("role", ""))
@@ -291,7 +322,7 @@ def build_team_summary(matching_output: Dict[str, Any] = None) -> Dict[str, Any]
         teams.append({
             "total_people": len(member_names),
             "team_name": team_name,
-            "role_counts": build_role_counts(member_names, student_map),
+            "role_counts": build_role_counts(member_names, student_map, final_team, algorithm_team),
             "leader": final_team.get("leader") or leader_member.get("name"),
             "matching_reason": evaluation.get("matching_reason") or final_team.get("reason", ""),
             "strengths": evaluation.get("strengths", ""),
