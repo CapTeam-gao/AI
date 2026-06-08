@@ -1,4 +1,6 @@
 #현재 팀원선호를 받아야하는데 
+#보안 팀은 보안끼리 붙이기, 게임도.
+#그리고 지금 로직이 매칭하면 분석하고 매칭되는 로직이라 ㅈㄴ 오래걸리는데 이거를 설문 받으면 분석해서 분석해논걸 가지고 매칭해서 시간 단축하기.
 from langchain_upstage import ChatUpstage
 from typing import Any,List,TypedDict,Dict
 import os
@@ -222,25 +224,12 @@ def choose_team_for_student(teams, student, max_team_size):
         if breaks_preference_constraints(projected_members):
             return 0
 
-        projected_scores = []
         projected_sizes = []
         for candidate_team in teams:
-            candidate_score = candidate_team["total_score"]
             candidate_size = len(candidate_team["members"])
             if candidate_team is team:
-                candidate_score += student["score"]
                 candidate_size += 1
-            projected_scores.append(candidate_score)
             projected_sizes.append(candidate_size)
-
-        # 아직 빈 팀이 있는 초기 배치 단계에서는 최종 균형을 만들 여지가 있으므로
-        # 점수/인원 gap 때문에 선호 보너스를 너무 일찍 끄지 않는다.
-        if projected_scores and projected_sizes and min(projected_sizes) > 0:
-            score_gap = max(projected_scores) - min(projected_scores)
-            average_score = sum(projected_scores) / len(projected_scores)
-            max_score_gap = max(8, average_score * 0.13) if average_score else 0
-            if score_gap > max_score_gap:
-                return 0
 
         if projected_sizes and min(projected_sizes) > 0 and max(projected_sizes) - min(projected_sizes) > 1:
             return 0
@@ -251,10 +240,10 @@ def choose_team_for_student(teams, student, max_team_size):
         available_teams,
         key=lambda team: ( #tuple이여서 위에서 아래순으로 우선순위를 따짐
             -safe_preference_bonus(team),
-            team["total_score"], #팀 총합 스코어, 팀 총점이 가장 낮은 팀 우선.
             team["role_groups"].get(role_group, 0),#팀에서 역할, 해당 역할 그룹 인원이 적은 팀 우선.
-            trait_penalty(team),
             len(team["members"]), #팀 인원 ,팀 인원이 적은 팀 우선.
+            trait_penalty(team),
+            team["total_score"], #팀 총합 스코어는 마지막 보조 기준으로 사용.
         ),
     )
 
@@ -649,17 +638,21 @@ def validation_balance_team(candidate_result, analyzed_students, base_teams=None
     ]
     score_gap = round(max(team_scores) - min(team_scores), 2) if team_scores else 0
     average_score = round(sum(team_scores) / len(team_scores), 2) if team_scores else 0
-    max_score_gap = max(8, average_score * 0.13) if average_score else 0
-    #max_score_gap 좀수정함 이거 검증이 너무 쉽게 통과 되는거 같아서.
+    soft_score_gap = max(15, average_score * 0.25) if average_score else 0
+    hard_score_gap = max(30, average_score * 0.45) if average_score else 0
 
-    if team_scores and score_gap > max_score_gap:
+    if team_scores and score_gap > hard_score_gap:
+        errors.append(
+            f"팀 점수 차이가 허용 범위를 크게 초과합니다. gap={score_gap}, hard_max={round(hard_score_gap, 2)}"
+        )
+    elif team_scores and score_gap > soft_score_gap:
         warnings.append(
-            f"팀 점수 차이가 큽니다. gap={score_gap}, recommended_max={round(max_score_gap, 2)}"
+            f"팀 점수 차이가 큽니다. gap={score_gap}, recommended_max={round(soft_score_gap, 2)}"
         )
 
     balance_result = {
         "is_balanced": not errors,
-        "need_adjustment": bool(errors or warnings),
+        "need_adjustment": bool(errors),
         "errors": errors,
         "warnings": warnings,
         "missing_names": missing_names,
@@ -669,6 +662,8 @@ def validation_balance_team(candidate_result, analyzed_students, base_teams=None
         "member_counts": member_counts,
         "score_gap": score_gap,
         "average_score": average_score,
+        "soft_score_gap": round(soft_score_gap, 2),
+        "hard_score_gap": round(hard_score_gap, 2),
     }
 
     return balance_result, team_evaluations
@@ -945,6 +940,52 @@ def adjust_team_node(state: MatchingState) -> Dict[str, Any]:
     }
 
 
+def remove_conflicting_leader_sentences(reason: str, leader_name: str, member_names: List[str]) -> str:
+    if not reason:
+        return ""
+
+    conflicting_names = [
+        name
+        for name in member_names
+        if name and name != leader_name
+    ]
+    sentences = [
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.!?。])\s+", reason)
+        if sentence.strip()
+    ]
+    filtered_sentences = []
+
+    for sentence in sentences:
+        mentions_wrong_leader = (
+            any(name in sentence for name in conflicting_names)
+            and any(keyword in sentence for keyword in ["팀장", "리더"])
+        )
+        if not mentions_wrong_leader:
+            filtered_sentences.append(sentence)
+
+    return " ".join(filtered_sentences)
+
+
+def align_reason_with_leader(team: Dict[str, Any], leader_name: str, member_names: List[str]) -> Dict[str, Any]:
+    reason = remove_conflicting_leader_sentences(
+        team.get("reason", ""),
+        leader_name,
+        member_names,
+    )
+    leader_prefix = f"{leader_name}을(를) 추천 팀장으로 지정했습니다."
+
+    if reason:
+        reason = f"{leader_prefix} {reason}"
+    else:
+        reason = leader_prefix
+
+    return {
+        **team,
+        "reason": reason,
+    }
+
+
 def enrich_final_teams(final_teams, analyzed_students):
     student_lookup = build_student_lookup(analyzed_students)
     enriched_teams = []
@@ -957,7 +998,8 @@ def enrich_final_teams(final_teams, analyzed_students):
             if name in student_lookup
         ]
         leader = choose_preference_aware_leader(members)
-        enriched_team = dict(team)
+        leader_name = leader.get("name", team.get("leader", ""))
+        enriched_team = align_reason_with_leader(dict(team), leader_name, member_names)
         enriched_team["leader"] = leader.get("name", enriched_team.get("leader", ""))
         enriched_team["leader_reason"] = build_leader_reason(leader)
         enriched_team["personality_averages"] = calculate_trait_averages(members, "personality_scores")
@@ -988,6 +1030,7 @@ def enrich_final_teams(final_teams, analyzed_students):
 def finalize_node(state: MatchingState) -> Dict[str, Any]:
     balance_result = state.get("balance_result", {})
     iteration_count = state.get("iteration_count", 0)
+    analyzed_students = state.get("analyzed_students", [])
 
     if balance_result.get("is_balanced") and not balance_result.get("need_adjustment"):
         finalized_by = "validation_passed"
@@ -996,20 +1039,48 @@ def finalize_node(state: MatchingState) -> Dict[str, Any]:
     else:
         finalized_by = "manual_finalize"
 
-    final_teams = enrich_final_teams(
-        state.get("llm_result") or state.get("teams", []),
-        state.get("analyzed_students", []),
+    candidate_teams = state.get("llm_result") or state.get("teams", [])
+    algorithm_errors = balance_result.get("algorithm_result", {}).get("errors", [])
+    has_assignment_error = bool(
+        algorithm_errors
+        or balance_result.get("missing_names")
+        or balance_result.get("duplicate_names")
+        or balance_result.get("unknown_names")
     )
+
+    if finalized_by == "max_iteration" and has_assignment_error:
+        # LLM이 반복 수정 후에도 누락/중복을 남기면 화면에는 검증 가능한 규칙 기반 팀을 보낸다.
+        candidate_teams = state.get("teams", [])
+        algorithm_balance, algorithm_evaluations = validation_balance_team(
+            candidate_teams,
+            analyzed_students,
+            base_teams=state.get("teams", []),
+        )
+        balance_result = {
+            **algorithm_balance,
+            "next_node": "finalize_node",
+            "algorithm_result": algorithm_balance,
+            "llm_result": balance_result.get("llm_result", {}),
+            "warnings": algorithm_balance.get("warnings", [])
+            + ["LLM 조정 결과에 누락/중복이 있어 규칙 기반 팀으로 확정했습니다."],
+            "adjustment_request": "",
+        }
+        team_evaluations = algorithm_evaluations
+        finalized_by = "algorithm_after_validation_failure"
+    else:
+        team_evaluations = state.get("team_evaluations", [])
+
+    final_teams = enrich_final_teams(candidate_teams, analyzed_students)
 
     final_result = {
         "final_teams": final_teams,
         "algorithm_teams": state.get("teams", []),
         "balance_result": balance_result,
-        "team_evaluations": state.get("team_evaluations", []),
+        "team_evaluations": team_evaluations,
         "adjustment_history": state.get("adjustment_history", []),
         "preference_rejections": build_preference_rejections(
             get_candidate_teams(final_teams),
-            state.get("analyzed_students", []),
+            analyzed_students,
         ),
         "iteration_count": iteration_count,
         "finalized_by": finalized_by,

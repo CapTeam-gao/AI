@@ -229,6 +229,23 @@ def normalize_role_counts(role_groups: Any) -> List[Dict[str, Any]]:
     return []
 
 
+def get_member_name(member: Any) -> Optional[str]:
+    if isinstance(member, dict):
+        return member.get("name")
+    return member
+
+
+def get_member_names(members: Any) -> List[str]:
+    if not isinstance(members, list):
+        return []
+
+    return [
+        member_name
+        for member_name in (get_member_name(member) for member in members)
+        if member_name
+    ]
+
+
 def build_role_counts(
     member_names: List[str],
     student_map: Dict[str, Dict[str, Any]],
@@ -291,6 +308,8 @@ def build_member_summaries(
         enriched_member = ensure_trait_profile({**student, **member})
         summaries.append({
             "name": enriched_member.get("name"),
+            "role": enriched_member.get("role"),
+            "role_group": enriched_member.get("role_group") or get_display_role_group(enriched_member.get("role", "")),
             "skill_level": normalize_skill_level_label(enriched_member.get("skill_level")),
             "top_stack_scores": get_student_top_stack_scores(student),
         })
@@ -312,7 +331,7 @@ def build_team_summary(matching_output: Dict[str, Any] = None) -> Dict[str, Any]
     teams = []
     for final_team in final_teams:
         team_name = final_team.get("team_name")
-        member_names = final_team.get("members", [])
+        member_names = get_member_names(final_team.get("members", []))
         algorithm_team = algorithm_team_map.get(team_name, {})
         algorithm_members = algorithm_team.get("members", [])
         evaluation = evaluation_map.get(team_name, {})
