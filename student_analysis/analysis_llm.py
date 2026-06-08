@@ -31,7 +31,7 @@ from capteam_traits import ensure_trait_profile
 def get_llm(model = "solar-pro3"):
     llm = ChatUpstage(
         model=model,
-        temperature=0.05,
+        temperature=0,
     ) #모델 랜덤성이 좀 있길레 temperature=0으로 해줌
     return llm
 
@@ -316,6 +316,8 @@ def normalize_analysis(response, student):
         result.get("stack_score", ""),  # stack_score 없으면 빈 문자열
         fixed_level
     )
+    if student.get("role") or student.get("goal"):
+        result["role"] = student.get("role") or student.get("goal")
     #
     if original_level != fixed_level:
         if skill_evidence["collaboration"] <= 1:
