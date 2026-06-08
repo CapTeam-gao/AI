@@ -203,6 +203,8 @@ def get_display_role_group(role: str) -> str:
         return "ai_data"
     if any(keyword in role_text for keyword in ["app", "android", "ios", "mobile", "앱", "모바일"]):
         return "app"
+    if any(keyword in role_text for keyword in ["design", "designer", "figma", "ui/ux", "ui", "ux", "디자인", "디자이너"]):
+        return "design"
     if any(keyword in role_text for keyword in ["unity", "game", "게임"]):
         return "game"
     return "etc"
@@ -244,6 +246,13 @@ def get_member_names(members: Any) -> List[str]:
         for member_name in (get_member_name(member) for member in members)
         if member_name
     ]
+
+
+def clean_reason_sections(reason: str) -> str:
+    if not reason:
+        return ""
+
+    return re.split(r"\s*\[(?:강점|보완점|약점|리스크)\]", reason, maxsplit=1)[0].strip()
 
 
 def build_role_counts(
@@ -337,15 +346,19 @@ def build_team_summary(matching_output: Dict[str, Any] = None) -> Dict[str, Any]
         evaluation = evaluation_map.get(team_name, {})
         member_summaries = build_member_summaries(member_names, algorithm_members, student_map)
         leader_member = choose_team_leader(member_summaries)
+        leader_name = final_team.get("leader") or leader_member.get("name")
+        matching_reason = clean_reason_sections(
+            final_team.get("reason") or evaluation.get("matching_reason", "")
+        )
 
         teams.append({
             "total_people": len(member_names),
             "team_name": team_name,
             "role_counts": build_role_counts(member_names, student_map, final_team, algorithm_team),
-            "leader": final_team.get("leader") or leader_member.get("name"),
-            "matching_reason": evaluation.get("matching_reason") or final_team.get("reason", ""),
-            "strengths": evaluation.get("strengths", ""),
-            "weaknesses": evaluation.get("risks", ""),
+            "leader": leader_name,
+            "matching_reason": matching_reason,
+            "strengths": "",
+            "weaknesses": "",
             "skill_level_counts": get_skill_level_counts(member_summaries),
             "members": member_summaries,
         })
