@@ -491,7 +491,7 @@ def get_matching_prompt_chain():
 - 알고리즘 초안을 기본 정답으로 보고, 자연어 분석상 명확히 더 좋은 조합이 있을 때만 최소한으로 보정한다.
 - 보정이 필요하지 않으면 initial_teams를 그대로 유지하고 이유만 설명한다.
 - 팀별 총점, 역할 다양성, 낮음 학생의 지원 가능성을 함께 본다.
-- 성격 성향과 개발 성향 점수는 팀 보완 관계를 설명할 때 사용한다.
+- 성격 성향과 개발 성향 점수는 팀 보완 관계를 판단할 때 사용하되, reason에는 숫자 점수를 직접 쓰지 않는다.
 - preferred_members는 강하게 고려하되, 점수/역할군/성향 균형을 깨면 선호를 분리할 수 있다.
 
 매칭 기준:
@@ -503,6 +503,7 @@ def get_matching_prompt_chain():
 - 같은 role_group만으로 구성된 팀은 가능하면 피한다.
 - suggestion, strength, weakness는 내부 판단 근거로만 사용하고 reason에 학생별 분석문을 옮겨 쓰지 않는다.
 - 성향/개발 점수는 전체 점수표처럼 나열하지 말고, 낮은 성향을 높은 성향의 팀원이 보완하는 관계를 설명할 때만 사용한다.
+- reason에는 "2점", "4.5점", "점수가 3"처럼 숫자 점수 표현을 쓰지 말고 "소통이 낮은 편", "책임감이 높은 팀원"처럼 자연어로 표현한다.
 - 팀장 추천은 leadership, planning, problemSolving 조합인 leader_score를 우선한다.
 - 팀 안에 wants_leader=true인 학생이 있으면 그 학생들 중 leader_score와 technical_score가 높은 학생을 팀장으로 추천한다.
 - preferred_members를 떨어뜨린 경우에는 균형을 위해 분리했다는 이유를 reason에 자연스럽게 포함한다.
@@ -531,7 +532,7 @@ def get_matching_prompt_chain():
         - 소통, 책임감, 협업, 유연성, 감정 안정성, 리더십, 문제 해결력, 구현 실행력, 학습 성장성, 기획 정리력 중 해당 팀에서 의미 있는 보완 관계를 2~3개 골라 설명한다.
         - 낮은 성향을 가진 학생이 있으면 같은 팀의 높은 성향 학생이 어떻게 회의, 역할 분담, 구현 진행, 일정 관리에서 보완할 수 있는지 설명한다.
         - 구현력이 높은 학생과 학습 성장성/협업 성향이 높은 학생이 같이 배치된 경우 실력 차이를 어떻게 보완할 수 있는지 설명한다.
-        - 점수를 언급할 때는 보완 관계를 설명하는 데 필요한 점수만 사용하고, 팀원별 모든 점수를 표처럼 나열하지 않는다.
+        - reason에는 "2점", "4.5점", "점수가 3"처럼 숫자 점수 표현을 쓰지 말고 "소통이 낮은 편", "책임감이 높은 팀원"처럼 자연어로 표현한다.
         - reason은 팀원을 한 명씩 순서대로 소개하거나 학생별 경력/스택을 나열하지 않는다.
         - reason에 [강점], [보완점], wants_leader, true/false, leadership, problemSolving, communication, implementation, learningAbility, planning 같은 내부 필드명을 포함하지 않는다.
 """
@@ -1013,7 +1014,7 @@ def get_adjust_team_prompt_chain():
     - balance_result.algorithm_result.warnings는 가능하면 완화한다.
     - balance_result.llm_result.adjustment_request를 우선적으로 반영한다.
     - student_analysis의 strength, weakness, suggestion은 내부 판단 근거로만 사용하고 reason에 학생별 분석문을 옮겨 쓰지 않는다.
-    - 성격성향/개발성향 점수는 팀 보완 관계를 설명할 때 사용한다.
+    - 성격성향/개발성향 점수는 팀 보완 관계를 판단할 때 사용하되, reason에는 숫자 점수를 직접 쓰지 않는다.
 
     계산 규칙:
     - 점수는 student_analysis 또는 algorithm_teams에 있는 score 값만 사용한다.
@@ -1037,7 +1038,7 @@ def get_adjust_team_prompt_chain():
     - 소통, 책임감, 협업, 유연성, 감정 안정성, 리더십, 문제 해결력, 구현 실행력, 학습 성장성, 기획 정리력 중 해당 팀에서 의미 있는 보완 관계를 2~3개 골라 설명한다.
     - 낮은 성향을 가진 학생이 있으면 같은 팀의 높은 성향 학생이 어떻게 회의, 역할 분담, 구현 진행, 일정 관리에서 보완할 수 있는지 설명한다.
     - 구현력이 높은 학생과 학습 성장성/협업 성향이 높은 학생이 같이 배치된 경우 실력 차이를 어떻게 보완할 수 있는지 설명한다.
-    - 점수를 언급할 때는 보완 관계를 설명하는 데 필요한 점수만 사용하고, 팀원별 모든 점수를 표처럼 나열하지 않는다.
+    - reason에는 "2점", "4.5점", "점수가 3"처럼 숫자 점수 표현을 쓰지 말고 "소통이 낮은 편", "책임감이 높은 팀원"처럼 자연어로 표현한다.
     - reason은 팀원을 한 명씩 순서대로 소개하거나 학생별 경력/스택을 나열하지 않는다.
     - reason에 [강점], [보완점], wants_leader, true/false, leadership, problemSolving, communication, implementation, learningAbility, planning 같은 내부 필드명을 포함하지 않는다.
     - reason에서 '초안 유지', '총점 변화 없음', '점수 차이가 작음', '구성이 안정적임', '균형이 유지됨' 같은 추상적 검증 문구만 쓰지 않는다.
