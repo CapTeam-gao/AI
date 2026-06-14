@@ -1,0 +1,188 @@
+{
+  "project": "CapTeam AI",
+  "description": "CapTeam의 학생 분석, 팀 매칭, 팀 결과 요약을 담당하는 FastAPI 기반 AI 서버 기능 목록",
+  "checked_scope": [
+    "api/main.py",
+    "student_analysis/analysis_llm.py",
+    "student_analysis/analysis_data.py",
+    "matching_student/upstage_matching.py",
+    "matching_student/workflow_matching_student.py",
+    "capteam_db.py",
+    "capteam_traits.py",
+    "capteam_preferences.py",
+    "journal_summary/summary.llm.py",
+    "mentor_matching/mentor_matching.py",
+    "docker-compose.yml",
+    "Dockerfile"
+  ],
+  "api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/health",
+      "feature_id": "health_check",
+      "description": "AI 서버가 정상 실행 중인지 확인한다."
+    },
+    {
+      "method": "GET",
+      "path": "/teams/summary",
+      "feature_id": "team_summary_api",
+      "description": "저장된 매칭 결과를 프론트엔드 표시용 팀 요약 데이터로 변환한다."
+    },
+    {
+      "method": "POST",
+      "path": "/analysis/run",
+      "feature_id": "student_analysis_run",
+      "description": "학생 데이터를 분석하고 분석 결과를 저장한다. body가 없으면 DB 학생 데이터를 사용한다."
+    },
+    {
+      "method": "POST",
+      "path": "/matching/run",
+      "feature_id": "team_matching_run",
+      "description": "학생 분석 후 팀 매칭 워크플로우를 실행하고 팀 요약 결과를 반환한다."
+    }
+  ],
+  "features": [
+    {
+      "id": "student_data_fetch",
+      "name": "학생 데이터 조회 및 정규화",
+      "status": "implemented",
+      "files": ["capteam_db.py"],
+      "summary": "MySQL에서 학생 데이터를 조회하고 stack, experience, collaboration 같은 필드를 매칭에 쓰기 쉬운 형태로 정리한다.",
+      "inputs": ["students table", "STUDENT_SOURCE_SQL", "STUDENT_SOURCE_TABLE", "STUDENT_SOURCE_ORDER_BY"],
+      "outputs": ["normalized student list"]
+    },
+    {
+      "id": "student_analysis",
+      "name": "LLM 기반 학생 역량 분석",
+      "status": "implemented",
+      "files": ["student_analysis/analysis_llm.py"],
+      "summary": "학생의 기술 스택과 경험을 분석해 strength, weakness, reason, stack_score, skill_level, role, suggestion을 생성한다.",
+      "inputs": ["student data", "skill_evidence"],
+      "outputs": ["StudentAnalysis result", "student_analysis_results table"]
+    },
+    {
+      "id": "skill_level_guardrail",
+      "name": "실력 등급 보정 및 스택 점수 제한",
+      "status": "implemented",
+      "files": ["student_analysis/analysis_llm.py"],
+      "summary": "협업 경험과 고급 구현 근거를 기준으로 과대평가된 skill_level을 보정하고, 등급별 stack_score 최대값을 제한한다.",
+      "inputs": ["LLM analysis response", "student experience", "collaboration"],
+      "outputs": ["normalized analysis result"]
+    },
+    {
+      "id": "trait_profile",
+      "name": "성격/개발 성향 프로필 생성",
+      "status": "implemented",
+      "files": ["capteam_traits.py"],
+      "summary": "소통, 책임감, 협업, 유연성, 감정 안정성, 리더십, 문제 해결력, 구현 실행력, 학습 성장성, 기획 정리력 점수를 정규화한다.",
+      "inputs": ["personality scores", "development scores"],
+      "outputs": ["personality_summary", "development_summary", "matching_traits", "leader_score"]
+    },
+    {
+      "id": "preference_profile",
+      "name": "팀장 선호 및 선호 팀원 처리",
+      "status": "implemented",
+      "files": ["capteam_preferences.py"],
+      "summary": "팀장 희망 여부와 선호 팀원을 정규화하고, 자기 자신/중복/없는 학생/최대 3명 초과 선호를 제외한다.",
+      "inputs": ["wants_leader", "preferred_members"],
+      "outputs": ["matching_preferences", "ignored_preferences"]
+    },
+    {
+      "id": "initial_team_matching",
+      "name": "규칙 기반 1차 팀 생성",
+      "status": "implemented",
+      "files": ["matching_student/upstage_matching.py", "matching_student/workflow_matching_student.py"],
+      "summary": "기술 점수, 성향 점수, 역할군, 팀장 선호, 선호 팀원, 팀 인원 균형을 기준으로 1차 팀을 만든다.",
+      "inputs": ["analyzed_students"],
+      "outputs": ["initial teams", "role_groups", "leader", "trait_risks", "preference_notes"]
+    },
+    {
+      "id": "llm_team_refinement",
+      "name": "LLM 기반 팀 조합 보정",
+      "status": "implemented",
+      "files": ["matching_student/upstage_matching.py"],
+      "summary": "1차 팀 초안을 기반으로 역할 조합, 성향 보완 관계, 선호 팀원을 고려해 필요한 경우만 팀을 보정한다.",
+      "inputs": ["initial teams", "student_analysis", "reason_context"],
+      "outputs": ["TeamMatchingResult"]
+    },
+    {
+      "id": "team_validation",
+      "name": "팀 매칭 검증",
+      "status": "implemented",
+      "files": ["matching_student/upstage_matching.py"],
+      "summary": "중복 배정, 누락, 없는 이름, 팀 인원, 점수 차이, 역할군 쏠림, 낮은 성향 리스크, 팀장 후보 여부를 검사한다.",
+      "inputs": ["candidate teams", "analyzed_students"],
+      "outputs": ["balance_result", "team_evaluations"]
+    },
+    {
+      "id": "team_adjustment_loop",
+      "name": "팀 수정 반복 및 fallback",
+      "status": "implemented",
+      "files": ["matching_student/upstage_matching.py"],
+      "summary": "검증 실패 시 LLM으로 최대 3회까지 팀을 수정하고, 누락/중복이 남으면 규칙 기반 팀으로 fallback한다.",
+      "inputs": ["balance_result", "current_candidate", "adjustment_history"],
+      "outputs": ["adjusted teams", "final_result", "finalized_by"]
+    },
+    {
+      "id": "matching_result_cache",
+      "name": "분석/매칭 결과 저장 및 캐시",
+      "status": "implemented",
+      "files": ["capteam_db.py", "matching_student/upstage_matching.py"],
+      "summary": "분석 결과와 매칭 결과를 MySQL에 저장하고, 필요하면 기존 결과를 재사용한다. 로컬 JSON 파일 fallback도 사용한다.",
+      "inputs": ["analysis result", "matching result", "FORCE_REANALYZE", "FORCE_REMATCH"],
+      "outputs": ["student_analysis_results", "team_matching_results", "analysis_output.json", "matching_output.json"]
+    },
+    {
+      "id": "team_summary_api",
+      "name": "프론트 표시용 팀 요약 생성",
+      "status": "implemented",
+      "files": ["api/main.py"],
+      "summary": "최종 매칭 결과를 총원, 팀명, 역할군 인원, 팀장, 매칭 이유, 실력 레벨 분포, 팀원별 상위 스택 점수로 요약한다.",
+      "inputs": ["final_result", "matching_output"],
+      "outputs": ["total_students", "total_teams", "teams summary"]
+    },
+    {
+      "id": "jsonl_to_json_converter",
+      "name": "학생 JSONL 데이터 변환",
+      "status": "utility",
+      "files": ["student_analysis/analysis_data.py"],
+      "summary": "student.jsonl 파일을 students2.json 파일로 변환하는 보조 스크립트다.",
+      "inputs": ["student.jsonl"],
+      "outputs": ["students2.json"]
+    },
+    {
+      "id": "docker_runtime",
+      "name": "Docker 기반 AI 서버 실행",
+      "status": "implemented",
+      "files": ["Dockerfile", "docker-compose.yml"],
+      "summary": "FastAPI AI 서버와 MySQL을 Docker Compose로 실행한다. AI 서버는 8000번, MySQL은 로컬 3307번 포트를 사용한다.",
+      "inputs": ["UPSTAGE_API_KEY", "DB_* environment variables"],
+      "outputs": ["ai-server container", "mysql container"]
+    },
+    {
+      "id": "journal_summary",
+      "name": "캡스톤 일지 요약",
+      "status": "prototype",
+      "files": ["journal_summary/summary.llm.py"],
+      "summary": "학생 일지를 선생님이 보기 쉽게 요약하려는 실험 코드다. 현재 FastAPI 엔드포인트와 연결되어 있지 않다.",
+      "inputs": ["journal context"],
+      "outputs": ["summary text"]
+    },
+    {
+      "id": "mentor_matching",
+      "name": "멘토 매칭",
+      "status": "not_implemented",
+      "files": ["mentor_matching/mentor_matching.py"],
+      "summary": "파일은 존재하지만 현재 구현 내용이 없다.",
+      "inputs": [],
+      "outputs": []
+    }
+  ],
+  "known_notes": [
+    "실제 운영 API는 api/main.py의 4개 엔드포인트만 노출되어 있다.",
+    "matching_student/upstage_matching.py가 현재 /matching/run에서 사용하는 기본 매칭 워크플로우다.",
+    "matching_student/workflow_matching_student.py는 OpenAI 계열 모델용으로 보이는 유사 워크플로우이며 현재 API에서는 주석 처리되어 있다.",
+    "journal_summary/summary.llm.py와 mentor_matching/mentor_matching.py는 현재 서비스 API에 연결되어 있지 않다.",
+    "DB 비밀번호 환경변수는 docker-compose.yml 기준 DB_PASSWORD를 사용하지만 capteam_db.py에는 기본 연결에서 오타로 보이는 DㅁB_PASSWORD 키가 있다."
+  ]
+}
