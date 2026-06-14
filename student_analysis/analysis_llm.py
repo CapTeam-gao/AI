@@ -2,7 +2,8 @@ import os
 import json
 import re
 from dotenv import load_dotenv
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"), override=True)
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", "..", ".env"), override=False)
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"), override=True)
 
 # from s_analysis_fewshot import examples
 from langchain_upstage import ChatUpstage
@@ -348,6 +349,29 @@ def normalize_analysis(response, student):
     return ensure_preference_profile({**student, **trait_result})
 
 
+def _get_cached_analysis_for_students(
+    cached_results: Optional[List[Dict[str, Any]]],
+    students: List[Dict[str, Any]],
+) -> Optional[List[Dict[str, Any]]]:
+    if not cached_results:
+        return None
+
+    cached_by_name = {
+        result.get("name"): result
+        for result in cached_results
+        if result.get("name")
+    }
+    student_names = [student.get("name") for student in students if student.get("name")]
+
+    if not student_names or any(name not in cached_by_name for name in student_names):
+        return None
+
+    return [
+        normalize_analysis(cached_by_name[student.get("name")], student)
+        for student in students
+    ]
+
+
 def get_analyze_stu(students: Optional[List[Dict[str, Any]]] = None):
     # 이미 분석 결과 있으면 재사용
     # 테스트할때 토큰 아낄려고 사용하는건데 나중에 진짜 완성하면 있어도 그냥 덮어씌우는 형태로 갈듯
@@ -359,18 +383,13 @@ def get_analyze_stu(students: Optional[List[Dict[str, Any]]] = None):
     if not datas:
         raise RuntimeError("분석할 학생 데이터가 없습니다.")
 
-    if students is None and not force_reanalyze:
+    if not force_reanalyze:
         cached_results = fetch_analysis_results()
-        if cached_results:
+        normalized_results = _get_cached_analysis_for_students(cached_results, datas)
+
+        if normalized_results:
             print("기존 분석 결과를 MySQL에서 불러오는 중...")
-
-            normalized_results = [
-                normalize_analysis(result, student)
-                for result, student in zip(cached_results, datas)
-            ]
-
             save_analysis_results(normalized_results)
-
             return normalized_results
 
     print("분석 결과 없음. 새로 분석 시작...")

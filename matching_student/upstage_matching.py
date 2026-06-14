@@ -1,11 +1,11 @@
 #현재 팀원선호를 받아야하는데 
-#보안 팀은 보안끼리 붙이기, 게임도.
-#그리고 지금 로직이 매칭하면 분석하고 매칭되는 로직이라 ㅈㄴ 오래걸리는데 이거를 설문 받으면 분석해서 분석해논걸 가지고 매칭해서 시간 단축하기.
+#게임 애들끼리 붙이기
+#그리고 지금 로직이 매칭하면 분석하고 매칭되는 로직이라 ㅈㄴ 오래걸리는데 이거를 설문 페이지에서 설문 받으면 분석해서 분석해논걸 가지고 매칭해서 시간 단축하기.
 #그리고 지금 분석이 되있어도 계속 새로 분석하는 로직임 이거 분석 결과 있으면 그거 보고 하도록 수정해야 할듯
 #그리고 지금 생성하는중에 나가면 그냥 안 끊기고 계속 실행이 됨.
 #매칭 이유도 가끔 잘나올때가 있는데 지금 역할이 지정한 역할에 없으면 etc로 넘어가는듯
 from langchain_upstage import ChatUpstage
-from typing import Any,List,TypedDict,Dict
+from typing import Any,List,TypedDict,Dict,Optional
 import os
 import json
 import math
@@ -14,9 +14,11 @@ from pathlib import Path
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"), override=True)
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", "..", ".env"), override=False)
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"), override=True)
 
 from capteam_db import fetch_analysis_results, fetch_matching_result, save_matching_result
+
 from capteam_preferences import (
     breaks_preference_constraints,
     build_preference_rejections,
@@ -68,6 +70,8 @@ SKILL_LEVEL_SCORE = {
     "보통": 2,
     "낮음": 1,
 }
+
+ROLE_GROUPS_TO_KEEP_TOGETHER = {"game"}
 
 
 
@@ -137,6 +141,8 @@ def get_role_group(role):
     # role은 "Frontend Developer", "백엔드 개발자", "AI 엔지니어"처럼 표현이 제각각이라
     # 큰 역할군으로 묶어서 한 팀에 같은 역할이 몰리지 않게 할 때 사용함.
     role_text = (role or "").lower()
+    if any(keyword in role_text for keyword in ["unity", "unreal", "game", "게임", "유니티", "언리얼"]):
+        return "game"
     #근데 테스트 해보니까 role에서 ai하고 backend가 둘다 들어가 있을때가 있음(ai/backend엔지니어 이런느낌으로) 그거 방지도 해야할듯
     if any(keyword in role_text for keyword in ["frontend", "front", "프론트"]):
         return "frontend"
@@ -148,8 +154,6 @@ def get_role_group(role):
         return "app"
     if any(keyword in role_text for keyword in ["design", "designer", "figma", "ui/ux", "ui", "ux", "디자인", "디자이너"]):
         return "design"
-    if any(keyword in role_text for keyword in ["unity", "게임"]):
-        return "game"
     return "etc"
 
 
@@ -240,7 +244,7 @@ def choose_team_for_student(teams, student):
         members = team.get("members", [])
         low_traits = get_low_trait_names(student)
         high_traits = get_high_trait_names(student)
-        member_low_traits = set().union(*(get_low_trait_names(member) for member in members)) if members else set()
+        member_low_traits = set().union(*(get_low_trait_names(member) for member in members)) if members else set() #여러 타입을 허용하여 유연한 데이터 처리와 가독성을 동시에 제공
         member_high_traits = set().union(*(get_high_trait_names(member) for member in members)) if members else set()
         repeated_low_count = len(low_traits & member_low_traits)
         complemented_count = len((low_traits & member_high_traits) | (high_traits & member_low_traits))
@@ -267,11 +271,17 @@ def choose_team_for_student(teams, student):
 
         return bonus
 
+    def role_group_priority(team):
+        current_count = team["role_groups"].get(role_group, 0)
+        if role_group in ROLE_GROUPS_TO_KEEP_TOGETHER:
+            return -current_count
+        return current_count
+
     return min(
         available_teams,
         key=lambda team: ( #tuple이여서 위에서 아래순으로 우선순위를 따짐
             -safe_preference_bonus(team),
-            team["role_groups"].get(role_group, 0),#팀에서 역할, 해당 역할 그룹 인원이 적은 팀 우선.
+            role_group_priority(team),#기본은 역할 다양성, game은 같은 역할군이 있는 팀 우선.
             len(team["members"]), #팀 인원 ,팀 인원이 적은 팀 우선.
             trait_penalty(team),
             team["total_score"], #팀 총합 스코어는 마지막 보조 기준으로 사용.
@@ -301,10 +311,13 @@ def create_initial_teams(analyzed_students, team_size=5, team_count=None):
         for student in analyzed_students #analyzed_student for문 돌려서 student에 넣음
     ]
 
-    # 점수가 높은 학생부터 배치하면 팀별 총점 차이를 줄이기 쉽다.
+    # 점수가 높은 학생부터 배치하되, 함께 배치해야 하는 역할군은 먼저 배치해 자리를 확보한다.
     sorted_students = sorted(
         student_summaries,#정렬할 데이터
-        key=lambda student: student["score"],#key = 정렬기준, student에 score를 기준으로 내림차순
+        key=lambda student: (
+            student["role_group"] in ROLE_GROUPS_TO_KEEP_TOGETHER,
+            student["score"],
+        ),#key = 정렬기준, 우선 묶음 역할군과 score를 기준으로 내림차순
         reverse=True, #내림차순
     )
 
@@ -500,7 +513,7 @@ def get_matching_prompt_chain():
 - 각 팀 인원 차이는 1명 이하를 유지한다.
 - 팀 총점 차이를 크게 악화시키는 재배정은 하지 않는다.
 - 낮음 학생은 가능하면 보통 또는 높음 학생과 함께 둔다.
-- 같은 role_group만으로 구성된 팀은 가능하면 피한다.
+- 같은 role_group만으로 구성된 팀은 가능하면 피하되, game 역할군은 프로젝트 특성상 가능한 같은 팀에 유지한다.
 - suggestion, strength, weakness는 내부 판단 근거로만 사용하고 reason에 학생별 분석문을 옮겨 쓰지 않는다.
 - 성향/개발 점수는 전체 점수표처럼 나열하지 말고, 낮은 성향을 높은 성향의 팀원이 보완하는 관계를 설명할 때만 사용한다.
 - reason에는 "2점", "4.5점", "점수가 3"처럼 숫자 점수 표현을 쓰지 말고 "소통이 낮은 편", "책임감이 높은 팀원"처럼 자연어로 표현한다.
@@ -700,6 +713,26 @@ def calculate_team_status(team, student_lookup):
     }
 
 
+def find_split_keep_together_roles(team_evaluations):
+    split_roles = []
+    max_team_size = max(
+        [evaluation["member_count"] for evaluation in team_evaluations] or [0]
+    )
+
+    for role_group in ROLE_GROUPS_TO_KEEP_TOGETHER:
+        counts = [
+            evaluation["role_groups"].get(role_group, 0)
+            for evaluation in team_evaluations
+        ]
+        total_count = sum(counts)
+        containing_team_count = sum(1 for count in counts if count > 0)
+
+        if total_count > 1 and containing_team_count > 1 and total_count <= max_team_size:
+            split_roles.append(role_group)
+
+    return split_roles
+
+
 def validation_balance_team(candidate_result, analyzed_students, base_teams=None):
     # 알고리즘으로 팀 검증하여 수정할 필요가 있는지 없는지 판단한다.
     # 여기서는 LLM을 쓰지 않고, 이름/중복/누락/점수/인원/역할 분포를 코드로 검사한다.
@@ -742,7 +775,12 @@ def validation_balance_team(candidate_result, analyzed_students, base_teams=None
         if team_status["skill_levels"].get("낮음", 0) == team_status["member_count"]:
             team_warnings.append("낮음 학생만으로 구성된 팀입니다.")
 
-        if len(team_status["role_groups"]) == 1 and team_status["member_count"] > 1:
+        only_role_group = next(iter(team_status["role_groups"]), None)
+        if (
+            len(team_status["role_groups"]) == 1
+            and team_status["member_count"] > 1
+            and only_role_group not in ROLE_GROUPS_TO_KEEP_TOGETHER
+        ):
             team_warnings.append("한 가지 역할군으로만 구성된 팀입니다.")
 
         for trait in CORE_RISK_TRAITS:
@@ -807,6 +845,13 @@ def validation_balance_team(candidate_result, analyzed_students, base_teams=None
     ]
     if member_counts and max(member_counts) - min(member_counts) > 1:
         errors.append(f"팀 인원 차이가 1명을 초과합니다: {member_counts}")
+
+    split_keep_together_roles = find_split_keep_together_roles(team_evaluations)
+    if split_keep_together_roles:
+        errors.append(
+            "같은 팀에 배치 가능한 역할군이 여러 팀으로 분리되었습니다: "
+            f"{split_keep_together_roles}"
+        )
 
     team_scores = [
         evaluation["total_score"]
@@ -1004,7 +1049,7 @@ def get_adjust_team_prompt_chain():
     - 팀별 인원 차이는 1명 이하로 유지한다.
     - 팀 총점 차이를 크게 악화시키지 않는다.
     - 낮음 학생은 가능하면 보통 또는 높음 학생과 함께 둔다.
-    - 같은 role_group만으로 구성된 팀은 가능하면 피한다.
+    - 같은 role_group만으로 구성된 팀은 가능하면 피하되, game 역할군은 프로젝트 특성상 가능한 같은 팀에 유지한다.
     - preferred_members는 강하게 고려하되, 점수/역할군/성향 균형을 깨면 선호를 분리할 수 있다.
     - 팀 안에 wants_leader=true인 학생이 있으면 그 학생들 중 leader_score와 technical_score가 높은 학생을 팀장으로 추천한다.
     - adjustment_history와 같은 수정 패턴을 반복하지 않는다.
@@ -1339,6 +1384,162 @@ def load_cached_matching_result(force_rematch=False):
         return None
 
     return fetch_matching_result()
+
+#프롬포트 기반 재생성
+def normalize_current_team_member(member: Any) -> str:
+    if isinstance(member, dict):
+        return (
+            member.get("name")
+            or member.get("studentName")
+            or member.get("userName")
+            or member.get("user_id")
+            or member.get("userId")
+            or ""
+        )
+    return str(member) if member is not None else ""
+
+
+def normalize_current_team(team: Dict[str, Any], index: int) -> Dict[str, Any]:
+    members = [
+        member_name
+        for member_name in (
+            normalize_current_team_member(member)
+            for member in team.get("members", [])
+        )
+        if member_name
+    ]
+
+    return {
+        "team_name": team.get("team_name") or team.get("teamName") or team.get("name") or f"팀 {index + 1}",
+        "members": members,
+        "total_score": float(team.get("total_score") or team.get("totalScore") or 0),
+        "role_groups": normalize_role_groups_for_regenerate(team.get("role_groups") or team.get("roleCounts")),
+        "leader": team.get("leader") or team.get("leaderName") or "",
+        "reason": team.get("reason") or team.get("matching_reason") or team.get("matchingReason") or "",
+    }
+
+
+def normalize_role_groups_for_regenerate(role_groups: Any) -> List[Dict[str, Any]]:
+    if isinstance(role_groups, list):
+        return [
+            {
+                "role_group": item.get("role_group") or item.get("roleGroup"),
+                "count": int(item.get("count", 0) or 0),
+            }
+            for item in role_groups
+            if isinstance(item, dict) and (item.get("role_group") or item.get("roleGroup"))
+        ]
+    if isinstance(role_groups, dict):
+        return [
+            {"role_group": role_group, "count": int(count or 0)}
+            for role_group, count in role_groups.items()
+            if role_group
+        ]
+    return []
+
+
+def normalize_current_teams(current_teams: Any) -> List[Dict[str, Any]]:
+    if not current_teams:
+        return []
+    if isinstance(current_teams, dict):
+        current_teams = current_teams.get("teams") or current_teams.get("final_teams") or []
+    if not isinstance(current_teams, list):
+        return []
+    return [
+        normalize_current_team(team, index)
+        for index, team in enumerate(current_teams)
+        if isinstance(team, dict)
+    ]
+
+
+def build_regenerate_state(
+    analyzed_students: List[Dict[str, Any]],
+    prompt: str,
+    current_teams: Optional[List[Dict[str, Any]]] = None,
+) -> MatchingState:
+    algorithm_teams = create_initial_teams(analyzed_students)
+    current_candidate = normalize_current_teams(current_teams)
+    if not current_candidate:
+        cached_result = load_cached_matching_result(force_rematch=False) or {}
+        current_candidate = get_candidate_teams((cached_result.get("final_result") or cached_result))
+    if not current_candidate:
+        current_candidate = algorithm_teams
+
+    algorithm_result, team_evaluations = validation_balance_team(
+        candidate_result=current_candidate,
+        analyzed_students=analyzed_students,
+        base_teams=algorithm_teams,
+    )
+    balance_result = {
+        "is_balanced": False,
+        "need_adjustment": True,
+        "next_node": "adjust_team_node",
+        "algorithm_result": algorithm_result,
+        "llm_result": {
+            "is_balanced": False,
+            "need_adjustment": True,
+            "overall_reason": "사용자 프롬프트 기반 재생성이 요청되었습니다.",
+            "adjustment_request": prompt,
+            "team_evaluations": [],
+        },
+        "errors": algorithm_result.get("errors", []),
+        "warnings": algorithm_result.get("warnings", []),
+        "adjustment_request": prompt,
+    }
+
+    return {
+        "analyzed_students": analyzed_students,
+        "teams": algorithm_teams,
+        "balance_result": balance_result,
+        "team_evaluations": team_evaluations,
+        "adjustment_history": [],
+        "final_result": {},
+        "llm_result": {
+            "final_teams": current_candidate,
+            "changed": False,
+            "change_summary": "사용자 프롬프트 재생성 전 현재 팀 구성입니다.",
+            "validation_notes": "사용자 프롬프트를 반영해 조정합니다.",
+        },
+        "iteration_count": 0,
+    }
+
+
+def run_regenerate_workflow(
+    prompt: str,
+    current_teams: Optional[List[Dict[str, Any]]] = None,
+    analyzed_students: Optional[List[Dict[str, Any]]] = None,
+):
+    prompt = (prompt or "").strip()
+    if not prompt:
+        raise ValueError("재생성 프롬프트가 비어 있습니다.")
+
+    state = build_regenerate_state(
+        analyzed_students=analyzed_students or load_analysis_output_json(),
+        prompt=prompt,
+        current_teams=current_teams,
+    )
+
+    while state.get("iteration_count", 0) < MAX_ITERATION:
+        state = {
+            **state,
+            **adjust_team_node(state),
+        }
+        evaluation_update = evaluate_balance_node(state)
+        state = {
+            **state,
+            **evaluation_update,
+        }
+        balance_result = state.get("balance_result", {})
+        if balance_result.get("is_balanced") and not balance_result.get("need_adjustment"):
+            break
+
+    result = finalize_node(state)
+    final_state = {
+        **state,
+        **result,
+    }
+    save_workflow_result(final_state)
+    return final_state
 
 
 def build_initial_state() -> MatchingState:

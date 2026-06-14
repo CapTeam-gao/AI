@@ -15,9 +15,9 @@ def get_connection():
     return pymysql.connect(
         #위에 _env함수를 써서 DB_HOST라는 환경변수가 설정되어 있는지 확인 없으면 지정해준 값으로 근데 docker나 sever에서 환경변수를 주면 그값으로 db에 연결
         host=_env("DB_HOST", "localhost"),
-        port=int(_env("DB_PORT", "3307")),
+        port=int(_env("DB_PORT", "3306")),
         user=_env("DB_USER", "root"),
-        password=_env("DㅁB_PASSWORD", "1234"),
+        password=_env("DB_PASSWORD", "1234"),
         database=_env("DB_NAME", "mydb"),
         charset="utf8mb4",
         cursorclass=DictCursor,
@@ -84,12 +84,42 @@ def _normalize_student(row: Dict[str, Any]) -> Dict[str, Any]:
 
 def fetch_students() -> List[Dict[str, Any]]:
     sql = os.getenv("STUDENT_SOURCE_SQL")
-    table = _env("STUDENT_SOURCE_TABLE", "students")
+    table = _env("STUDENT_SOURCE_TABLE", "users")
     order_by = os.getenv("STUDENT_SOURCE_ORDER_BY", "id")
 
     if not sql:
-        sql = f"SELECT * FROM `{table}`"
-        if order_by:
+        if table == "users":
+            sql = """
+            SELECT
+                u.user_id,
+                u.name,
+                u.student_role AS goal,
+                u.grade,
+                u.wants_leader,
+                u.personality_communication AS communication,
+                u.personality_responsibility AS responsibility,
+                u.personality_collaboration AS collaboration,
+                u.personality_flexibility AS flexibility,
+                u.personality_emotional_stability AS emotionalStability,
+                u.development_leadership AS leadership,
+                u.development_problem_solving AS problemSolving,
+                u.development_implementation AS implementation,
+                u.development_learning_ability AS learningAbility,
+                u.development_planning AS planning,
+                (SELECT JSON_ARRAYAGG(skill) FROM user_skill WHERE user_user_id = u.user_id) AS stack,
+                (SELECT JSON_ARRAYAGG(experience) FROM user_experience WHERE user_user_id = u.user_id) AS experience,
+                (SELECT JSON_ARRAYAGG(preferred_teammates) FROM user_preferred_teammates WHERE user_user_id = u.user_id) AS preferred_members
+            FROM users u
+            WHERE u.account_role = 'STUDENT'
+              AND u.survey_completed = b'1'
+            ORDER BY u.user_id
+            """
+        else:
+            sql = f"SELECT * FROM `{table}`"
+            if order_by:
+                sql += f" ORDER BY `{order_by}`"
+    elif order_by and f"ORDER BY `{order_by}`" not in sql:
+        if table != "users":
             sql += f" ORDER BY `{order_by}`"
 
     try:

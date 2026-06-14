@@ -403,4 +403,29 @@ def run_matching(students: Optional[List[Dict[str, Any]]] = Body(default=None)):
 
     result = run_workflow(force_rematch=True)
     return build_team_summary(result)
+
+
+@app.post("/matching/regenerate")
+def regenerate_matching(payload: Optional[Dict[str, Any]] = Body(default=None)):
+    from student_analysis.analysis_llm import get_analyze_stu
+    from matching_student.upstage_matching import run_regenerate_workflow
+
+    payload = payload or {}
+    prompt = (payload.get("prompt") or "").strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="재생성 프롬프트가 비어 있습니다.")
+
+    request_students = normalize_request_students(payload.get("students"))
+    analyzed_students = get_analyze_stu(request_students) if request_students is not None else None
+
+    try:
+        result = run_regenerate_workflow(
+            prompt=prompt,
+            current_teams=payload.get("current_teams") or payload.get("currentTeams"),
+            analyzed_students=analyzed_students,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    return build_team_summary(result)
 #uvicorn api.main:app --reload
