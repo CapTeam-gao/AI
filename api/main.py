@@ -255,6 +255,34 @@ def clean_reason_sections(reason: str) -> str:
     return re.split(r"\s*\[(?:강점|보완점|약점|리스크)\]", reason, maxsplit=1)[0].strip()
 
 
+def normalize_reason_cards(final_team: Dict[str, Any], matching_reason: str) -> List[Dict[str, str]]:
+    reason_cards = final_team.get("reason_cards") or final_team.get("reasonCards") or []
+    if isinstance(reason_cards, list):
+        normalized_cards = []
+        for card in reason_cards:
+            if not isinstance(card, dict):
+                continue
+
+            title = (card.get("title") or "").strip()
+            description = clean_reason_sections((card.get("description") or "").strip())
+            if title and description:
+                normalized_cards.append({
+                    "title": title,
+                    "description": description,
+                })
+
+        if normalized_cards:
+            return normalized_cards
+
+    if matching_reason:
+        return [{
+            "title": "팀 배정 이유",
+            "description": matching_reason,
+        }]
+
+    return []
+
+
 def build_role_counts(
     member_names: List[str],
     student_map: Dict[str, Dict[str, Any]],
@@ -335,7 +363,6 @@ def build_team_summary(matching_output: Dict[str, Any] = None) -> Dict[str, Any]
 
     student_map = build_student_map(matching_output)
     algorithm_team_map = build_algorithm_team_map(final_result, matching_output)
-    evaluation_map = build_evaluation_map(final_result, matching_output)
 
     teams = []
     for final_team in final_teams:
@@ -343,13 +370,11 @@ def build_team_summary(matching_output: Dict[str, Any] = None) -> Dict[str, Any]
         member_names = get_member_names(final_team.get("members", []))
         algorithm_team = algorithm_team_map.get(team_name, {})
         algorithm_members = algorithm_team.get("members", [])
-        evaluation = evaluation_map.get(team_name, {})
         member_summaries = build_member_summaries(member_names, algorithm_members, student_map)
         leader_member = choose_team_leader(member_summaries)
         leader_name = final_team.get("leader") or leader_member.get("name")
-        matching_reason = clean_reason_sections(
-            final_team.get("reason") or evaluation.get("matching_reason", "")
-        )
+        matching_reason = clean_reason_sections(final_team.get("reason", ""))
+        reason_cards = normalize_reason_cards(final_team, matching_reason)
 
         teams.append({
             "total_people": len(member_names),
@@ -357,6 +382,7 @@ def build_team_summary(matching_output: Dict[str, Any] = None) -> Dict[str, Any]
             "role_counts": build_role_counts(member_names, student_map, final_team, algorithm_team),
             "leader": leader_name,
             "matching_reason": matching_reason,
+            "reason_cards": reason_cards,
             "strengths": "",
             "weaknesses": "",
             "skill_level_counts": get_skill_level_counts(member_summaries),
