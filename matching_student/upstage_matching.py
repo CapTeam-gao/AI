@@ -1,9 +1,3 @@
-#현재 팀원선호를 받아야하는데 
-#게임 애들끼리 붙이기
-#그리고 지금 로직이 매칭하면 분석하고 매칭되는 로직이라 ㅈㄴ 오래걸리는데 이거를 설문 페이지에서 설문 받으면 분석해서 분석해논걸 가지고 매칭해서 시간 단축하기.
-#그리고 지금 분석이 되있어도 계속 새로 분석하는 로직임 이거 분석 결과 있으면 그거 보고 하도록 수정해야 할듯
-#그리고 지금 생성하는중에 나가면 그냥 안 끊기고 계속 실행이 됨.
-#매칭 이유도 가끔 잘나올때가 있는데 지금 역할이 지정한 역할에 없으면 etc로 넘어가는듯
 from langchain_upstage import ChatUpstage
 from typing import Any,List,TypedDict,Dict,Optional
 import copy
@@ -374,18 +368,6 @@ def parse_reason_stack_names(stack_score: str, limit: int = 2) -> List[str]:
 
     scored_stacks.sort(key=lambda item: item[1], reverse=True)
     return [stack for stack, _ in scored_stacks[:limit]]
-
-
-def get_reason_experiences(member: Dict[str, Any], limit: int = 2) -> List[str]:
-    experiences = member.get("experience") or member.get("experiences") or []
-    if not isinstance(experiences, list):
-        return []
-
-    return [
-        experience
-        for experience in experiences
-        if isinstance(experience, str) and experience.strip()
-    ][:limit]
 
 
 def summarize_reason_traits(member: Dict[str, Any]) -> Dict[str, Any]:
@@ -1414,36 +1396,6 @@ def enrich_final_teams(final_teams, analyzed_students):
     return enriched_teams
 
 
-INTERMEDIATE_REASON_KEYWORDS = [
-    "이동시키면",
-    "추가하면",
-    "교체하면",
-    "옮기면",
-    "이동시키는 것을 제안",
-    "추가하는 것을 제안",
-    "교체하는 것을 제안",
-    "옮기는 것을 제안",
-]
-
-GENERIC_TRAIT_REASON_PATTERNS = [
-    "각 구성원의 소통, 책임감, 협업, 유연성",
-    "성격 성향이 고르게 분포",
-]
-
-def summarize_role_distribution_for_reason(members: List[Dict[str, Any]]) -> str:
-    role_counts: Dict[str, int] = {}
-    for member in members:
-        role_group = member.get("role_group") or get_role_group(member.get("role"))
-        role_counts[role_group] = role_counts.get(role_group, 0) + 1
-
-    role_parts = []
-    for role_group, count in role_counts.items():
-        role_label = get_reason_role_label(role_group)
-        role_parts.append(f"{role_label} {count}명" if count > 1 else role_label)
-
-    return ", ".join(role_parts) if role_parts else "역할"
-
-
 def collect_representative_stacks_for_reason(members: List[Dict[str, Any]], limit: int = 3) -> List[str]:
     stacks = []
     seen = set()
@@ -1457,90 +1409,6 @@ def collect_representative_stacks_for_reason(members: List[Dict[str, Any]], limi
                 return stacks
 
     return stacks
-
-
-def object_particle(name: str) -> str:
-    if not name:
-        return "을"
-
-    last_char = name[-1]
-    if not ("가" <= last_char <= "힣"):
-        return "을"
-
-    return "을" if (ord(last_char) - ord("가")) % 28 else "를"
-
-
-def build_rule_based_final_reason(team: Dict[str, Any], analyzed_students: List[Dict[str, Any]]) -> str:
-    return " ".join(card["description"] for card in build_rule_based_reason_cards(team, analyzed_students))
-
-
-def build_rule_based_reason_cards(team: Dict[str, Any], analyzed_students: List[Dict[str, Any]]) -> List[Dict[str, str]]:
-    student_lookup = build_student_lookup(analyzed_students)
-    member_names = get_member_names(team)
-    members = [
-        student_lookup[name]
-        for name in member_names
-        if name in student_lookup
-    ]
-    role_summary = summarize_role_distribution_for_reason(members)
-    representative_stacks = collect_representative_stacks_for_reason(members)
-    leader_name = team.get("leader") or choose_preference_aware_leader(members).get("name", "")
-    complements = build_trait_complements(members)
-
-    stack_phrase = (
-        f" {', '.join(representative_stacks)} 같은 대표 스택을 역할 흐름에 연결할 수 있어"
-        if representative_stacks
-        else ""
-    )
-    first_card = {
-        "title": "역할 구성이 안정적인 팀",
-        "description": (
-            f"이 팀은 {role_summary} 역할이 함께 배치되어{stack_phrase} "
-            "서비스 개발에 필요한 작업 흐름을 나누기 쉬운 구성입니다. "
-            "화면 설계, 기능 구현, 데이터 연동, 검증 작업을 역할별로 맡기기 좋아 진행 상황을 관리하기 쉽습니다."
-        ),
-    }
-
-    if complements:
-        complement_labels = []
-        for complement in complements[:2]:
-            label = complement.get("label")
-            supporters = [
-                supporter.get("name")
-                for supporter in complement.get("supporters", [])
-                if supporter.get("name")
-            ]
-            if label and supporters:
-                complement_labels.append(f"{label}은 {', '.join(supporters)}이 보완")
-
-        if complement_labels:
-            second_description = (
-                f"성향 면에서는 {'하고, '.join(complement_labels)}할 수 있어 회의와 역할 분담의 안정성을 높일 수 있습니다. "
-                "기능 개발에 집중하는 역할과 의견을 조율하는 역할이 함께 있어 개발 속도와 협업 안정성을 함께 기대할 수 있습니다."
-            )
-            second_title = "협업 성향을 고려한 역할 배치"
-        else:
-            second_description = ""
-            second_title = ""
-    else:
-        second_description = ""
-        second_title = ""
-
-    if leader_name:
-        second_title = second_title or "리더십 중심의 팀 운영 가능"
-        second_description = second_description or (
-            "이 팀은 역할이 나뉘어 있어 프로젝트 초반 방향성과 일정 정리를 맡을 리더 역할이 중요합니다. "
-            f"{leader_name}{object_particle(leader_name)} 팀장으로 두면 역할 분담과 진행 상황 정리를 안정적으로 가져갈 수 있습니다."
-        )
-
-    if not second_description:
-        second_title = "기능 구현과 화면 완성도를 함께 고려한 팀"
-        second_description = (
-            "이 팀은 기능 개발과 사용자 화면 완성도를 함께 고려할 수 있는 구성입니다. "
-            "역할별 담당 범위가 분리되어 있어 핵심 기능 구현과 사용 흐름 개선을 동시에 진행하기 좋습니다."
-        )
-
-    return [first_card, {"title": second_title, "description": second_description}]
 
 
 def compact_reason_text(value: Any, limit: int = 90) -> str:
@@ -1601,90 +1469,6 @@ def build_reason_card_context(final_teams, analyzed_students):
         })
 
     return contexts
-
-
-def reason_mentions_outside_members(reason: str, member_names: List[str], all_student_names: List[str]) -> bool:
-    member_name_set = set(member_names)
-    for student_name in all_student_names:
-        if student_name not in member_name_set and student_name in reason:
-            return True
-    return False
-
-
-def reason_lists_too_many_members(reason: str, member_names: List[str]) -> bool:
-    if len(member_names) < 4:
-        return False
-
-    mentioned_count = sum(1 for member_name in member_names if member_name in reason)
-    return mentioned_count >= 4
-
-
-def should_replace_final_reason(reason: str, member_names: List[str], all_student_names: List[str], *, allow_empty: bool = False) -> bool:
-    if not reason or not reason.strip():
-        return not allow_empty
-
-    if reason_mentions_outside_members(reason, member_names, all_student_names):
-        return True
-
-    if reason_lists_too_many_members(reason, member_names):
-        return True
-
-    if any(keyword in reason for keyword in INTERMEDIATE_REASON_KEYWORDS):
-        return True
-
-    return any(pattern in reason for pattern in GENERIC_TRAIT_REASON_PATTERNS)
-
-
-def normalize_reason_cards(team: Dict[str, Any], member_names: List[str], all_student_names: List[str]) -> List[Dict[str, str]]:
-    cards = team.get("reason_cards") or team.get("reasonCards") or []
-    if not isinstance(cards, list):
-        return []
-
-    normalized_cards = []
-    for card in cards:
-        if not isinstance(card, dict):
-            return []
-
-        title = (card.get("title") or "").strip()
-        description = clean_reason_sections((card.get("description") or "").strip())
-        if (
-            not title
-            or description == title
-            or len(description) < 40
-            or should_replace_final_reason(description, member_names, all_student_names)
-        ):
-            return []
-
-        normalized_cards.append({
-            "title": title,
-            "description": description,
-        })
-
-    return normalized_cards if len(normalized_cards) == 2 else []
-
-
-def ensure_final_team_reasons(final_teams, analyzed_students):
-    all_student_names = get_student_names(analyzed_students)
-    fixed_teams = []
-
-    for team in get_candidate_teams(final_teams):
-        fixed_team = dict(team)
-        member_names = get_member_names(fixed_team)
-        reason_cards = normalize_reason_cards(fixed_team, member_names, all_student_names)
-        if not reason_cards:
-            reason_cards = build_rule_based_reason_cards(fixed_team, analyzed_students)
-
-        reason = clean_reason_sections(fixed_team.get("reason", ""))
-        if should_replace_final_reason(reason, member_names, all_student_names, allow_empty=True):
-            reason = " ".join(card["description"] for card in reason_cards)
-        if not reason:
-            reason = " ".join(card["description"] for card in reason_cards)
-
-        fixed_team["reason_cards"] = reason_cards
-        fixed_team["reason"] = reason
-        fixed_teams.append(fixed_team)
-
-    return fixed_teams
 
 
 def clear_final_team_reasons(final_teams):
@@ -2208,51 +1992,3 @@ def run_workflow(force_rematch=False):
 if __name__ == "__main__":
     result = run_workflow()
     print(json.dumps(result.get("final_result", result), ensure_ascii=False, indent=2))
-#balance_result와 team_evalution결과가 좋으면 final_result에 바로 저장하고 안좋으면 수정하여 adjustment_history에 기록하여 같은결과과 나오지 않도록함
-#그리고 또 별로라면 다시 수정 밸런스검사 좋을때까지 반복.
-#   - adjust: 팀 상태가 별로라서 다시 고치는 단계
-#   - finalize: 팀 상태가 좋아서 최종 확정하는 단계
-#이런식으로 저장
-
-# load_analysis_node
-
-#   MySQL의 분석 결과를 읽어서 analyzed_students에 저장.
-
-#   create_team_node
-
-#   분석 결과를 보고 1차 팀 생성. 결과를 teams에 저장.
-
-#   evaluate_balance_node
-
-#   현재 teams를 평가해서:
-
-#   - 전체 평가: balance_result
-#   - 팀별 평가: team_evaluations
-
-#   에 저장.
-
-#   should_adjust`
-
-#   노드라기보다는 조건 분기 함수.
-#   balance_result["is_balanced"] 같은 값을 보고:
-
-#   좋음 -> finalize_node
-#   나쁨 -> adjust_team_node
-
-#   로 보냄.
-
-#   adjust_team_node
-
-#   팀을 수정하고 adjustment_history에 기록.
-#   수정된 팀은 다시 teams에 저장.
-
-#   finalize_node
-
-#   최종 팀 결과와 설명을 final_result에 저장.
-
-#근데 이거 코드 ㅈㄴ 길어서 토큰값 레전드로 많이 나올듯 이걸 계속 검증하는거니까
-#팀 매칭시 학생의 성격과 개발 성향을 고려하여 팀매칭하는로직
-
-#현재 팀 매칭 로직은 LangGraph 기반 workflow 구조로 설계했습니다. 
-#각 단계는 노드로 분리되어 있고, 팀 생성, LLM 보정, 알고리즘 검증, LLM 검증, 수정, 최종 확정 노드가 state를 주고받으며 동작합니다.
-#검증 결과에 따라 최종 확정 또는 수정 노드로 분기하고, 수정된 결과는 다시 검증 단계로 돌아가는 반복 구조입니다.
