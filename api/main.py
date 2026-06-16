@@ -115,6 +115,11 @@ def get_algorithm_teams(final_result: Dict[str, Any], matching_output: Dict[str,
 
 
 def get_team_evaluations(final_result: Dict[str, Any], matching_output: Dict[str, Any]) -> List[Dict[str, Any]]:
+    if final_result.get("team_evaluations"):
+        return final_result.get("team_evaluations", [])
+    if matching_output.get("team_evaluations"):
+        return matching_output.get("team_evaluations", [])
+
     balance_result = final_result.get("balance_result") or matching_output.get("balance_result", {})
     llm_result = balance_result.get("llm_result", {})
     return llm_result.get("team_evaluations", [])
@@ -327,6 +332,34 @@ def get_skill_level_counts(members: List[Dict[str, Any]]) -> Dict[str, int]:
     return counts
 
 
+def first_text(*values: Any) -> str:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if isinstance(value, list):
+            text = ", ".join(str(item).strip() for item in value if str(item).strip())
+            if text:
+                return text
+    return ""
+
+
+def summarize_team_analysis(
+    member_names: List[str],
+    student_map: Dict[str, Dict[str, Any]],
+    field: str,
+    fallback: str,
+) -> str:
+    summaries = [
+        student_map.get(member_name, {}).get(field, "").strip()
+        for member_name in member_names
+        if student_map.get(member_name, {}).get(field)
+    ]
+    if not summaries:
+        return fallback
+
+    return " ".join(summaries[:2])
+
+
 def build_member_summaries(
     member_names: List[str],
     algorithm_members: List[Dict[str, Any]],
@@ -348,6 +381,7 @@ def build_member_summaries(
             "role": enriched_member.get("role"),
             "role_group": enriched_member.get("role_group") or get_display_role_group(enriched_member.get("role", "")),
             "skill_level": normalize_skill_level_label(enriched_member.get("skill_level")),
+            "score": round(float(enriched_member.get("score", 0) or 0), 2),
             "top_stack_scores": get_student_top_stack_scores(student),
         })
 
@@ -363,12 +397,14 @@ def build_team_summary(matching_output: Dict[str, Any] = None) -> Dict[str, Any]
 
     student_map = build_student_map(matching_output)
     algorithm_team_map = build_algorithm_team_map(final_result, matching_output)
+    evaluation_map = build_evaluation_map(final_result, matching_output)
 
     teams = []
     for final_team in final_teams:
         team_name = final_team.get("team_name")
         member_names = get_member_names(final_team.get("members", []))
         algorithm_team = algorithm_team_map.get(team_name, {})
+        evaluation = evaluation_map.get(team_name, {})
         algorithm_members = algorithm_team.get("members", [])
         member_summaries = build_member_summaries(member_names, algorithm_members, student_map)
         leader_member = choose_team_leader(member_summaries)
@@ -383,8 +419,30 @@ def build_team_summary(matching_output: Dict[str, Any] = None) -> Dict[str, Any]
             "leader": leader_name,
             "matching_reason": matching_reason,
             "reason_cards": reason_cards,
-            "strengths": "",
-            "weaknesses": "",
+            "strengths": first_text(
+                final_team.get("strengths"),
+                final_team.get("strength"),
+                evaluation.get("strengths"),
+                summarize_team_analysis(
+                    member_names,
+                    student_map,
+                    "strength",
+                    matching_reason,
+                ),
+            ),
+            "weaknesses": first_text(
+                final_team.get("weaknesses"),
+                final_team.get("weakness"),
+                final_team.get("risks"),
+                evaluation.get("weaknesses"),
+                evaluation.get("risks"),
+                summarize_team_analysis(
+                    member_names,
+                    student_map,
+                    "weakness",
+                    "뚜렷한 팀 약점은 확인되지 않았습니다.",
+                ),
+            ),
             "skill_level_counts": get_skill_level_counts(member_summaries),
             "members": member_summaries,
         })
