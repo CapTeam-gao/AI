@@ -1153,9 +1153,9 @@ def validation_balance_team(candidate_result, analyzed_students, base_teams=None
 
     unmet_preference_pairs = find_unmet_preference_pairs(candidate_teams, analyzed_students)
     if unmet_preference_pairs:
-        errors.append(
+        warnings.append(
             "선호 팀원이 같은 팀에 배치되지 않았습니다. "
-            f"조정 노드에서 역할/점수/성향 균형을 해치지 않는 범위로 우선 반영하세요: {unmet_preference_pairs}"
+            f"역할/점수/성향 균형을 우선해 미반영 선호를 기록합니다: {unmet_preference_pairs}"
         )
 
     team_scores = [
