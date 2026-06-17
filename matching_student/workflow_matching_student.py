@@ -99,6 +99,7 @@ def merge_latest_preferences(analyzed_students: List[Dict[str, Any]]) -> List[Di
         for student in source_students
         if student.get("name")
     }
+
     merged_students = []
     for student in analyzed_students:
         source = source_by_name.get(student.get("name"))
@@ -182,6 +183,7 @@ def get_student_score(student):
 #같은 분야에 사람이 한팀에 많이 들어오지 않게 하기 위해서
 # 자유 입력 역할 문자열을 매칭용 role_group으로 분류한다.
 # 프론트/백엔드/AI/앱/디자인/게임/기타 중 하나를 반환한다.
+#이거 더 채워야할듯 우리학교 분야가 너무 많아서 
 def get_role_group(role):
     # role은 "Frontend Developer", "백엔드 개발자", "AI 엔지니어"처럼 표현이 제각각이라
     # 큰 역할군으로 묶어서 한 팀에 같은 역할이 몰리지 않게 할 때 사용함.
@@ -859,9 +861,9 @@ def llm_analyzed(state: MatchingState, analyzed_students=None):
         #json.dump = 데이터를 json으로 저장하는 함수
         #ensure_ascil = 한글 같은 유니코드를 ASCII 형태로 바꿀지 결정하는 옵션. indent = 보기좋게 들여쓰기 할때 사용
         "allowed_student_names": json.dumps(allowed_student_names, ensure_ascii=False),
-        "student_analysis": json.dumps(analyzed_students, ensure_ascii=False, indent=2),
-        "initial_teams": json.dumps(initial_teams, ensure_ascii=False, indent=2),
-        "reason_context": json.dumps(reason_context, ensure_ascii=False, indent=2),
+        "student_analysis": json.dumps(analyzed_students, ensure_ascii=False, indent=0),
+        "initial_teams": json.dumps(initial_teams, ensure_ascii=False, indent=0),
+        "reason_context": json.dumps(reason_context, ensure_ascii=False, indent=0),
     })
     #삼항연산자 (A if 조건 else B)
 
@@ -1474,9 +1476,9 @@ def llm_validation_balance_team(candidate_result, analyzed_students, algorithm_r
     chain = get_llm_balance_prompt_chain() | structured_llm
 
     response = chain.invoke({
-        "candidate_result": json.dumps(candidate_result, ensure_ascii=False, indent=2),
-        "student_analysis": json.dumps(analyzed_students, ensure_ascii=False, indent=2),
-        "algorithm_result": json.dumps(algorithm_result, ensure_ascii=False, indent=2),
+        "candidate_result": json.dumps(candidate_result, ensure_ascii=False, indent=0),
+        "student_analysis": json.dumps(analyzed_students, ensure_ascii=False, indent=0),
+        "algorithm_result": json.dumps(algorithm_result, ensure_ascii=False, indent=0),
     })
 
     return response.model_dump()
@@ -1665,12 +1667,12 @@ def adjust_team_node(state: MatchingState) -> Dict[str, Any]:
 
     response = chain.invoke({
         "allowed_student_names": json.dumps(allowed_student_names, ensure_ascii=False),
-        "student_analysis": json.dumps(analyzed_students, ensure_ascii=False, indent=2),
-        "algorithm_teams": json.dumps(algorithm_teams, ensure_ascii=False, indent=2),
-        "current_candidate": json.dumps(current_candidate, ensure_ascii=False, indent=2),
-        "reason_context": json.dumps(reason_context, ensure_ascii=False, indent=2),
-        "balance_result": json.dumps(balance_result, ensure_ascii=False, indent=2),
-        "adjustment_history": json.dumps(adjustment_history, ensure_ascii=False, indent=2),
+        "student_analysis": json.dumps(analyzed_students, ensure_ascii=False, indent=0),
+        "algorithm_teams": json.dumps(algorithm_teams, ensure_ascii=False, indent=0),
+        "current_candidate": json.dumps(current_candidate, ensure_ascii=False, indent=0),
+        "reason_context": json.dumps(reason_context, ensure_ascii=False, indent=0),
+        "balance_result": json.dumps(balance_result, ensure_ascii=False, indent=0),
+        "adjustment_history": json.dumps(adjustment_history, ensure_ascii=False, indent=0),
     })
 
     adjusted_result = response.model_dump() if hasattr(response, "model_dump") else response
@@ -2106,43 +2108,6 @@ def build_reason_card_context(final_teams, analyzed_students):
     return contexts
 
 
-# 최종 팀 목록에서 reason_cards와 reason을 빈 값으로 초기화한다.
-# 이유 생성 LLM 실패 시 fallback으로 카드 없이 반환하기 위해 사용한다.
-def clear_final_team_reasons(final_teams):
-    fixed_teams = []
-    for team in get_candidate_teams(final_teams):
-        fixed_team = dict(team)
-        fixed_team["reason_cards"] = []
-        fixed_team["reason"] = ""
-        fixed_teams.append(fixed_team)
-
-    return fixed_teams
-
-
-# LLM이 만든 reason_cards를 title/description만 남겨 정리한다.
-# 잘못된 카드 형식은 건너뛰고 최소 2개, 최대 3개 카드까지 반환한다.
-def sanitize_llm_reason_cards(cards: Any) -> List[Dict[str, str]]:
-    if not isinstance(cards, list):
-        return []
-
-    sanitized_cards = []
-    for card in cards:
-        if not isinstance(card, dict):
-            continue
-
-        title = (card.get("title") or "").strip()
-        description = clean_reason_sections((card.get("description") or "").strip())
-        if not title or not description:
-            continue
-
-        sanitized_cards.append({
-            "title": title,
-            "description": description,
-        })
-
-    return sanitized_cards[:3]
-
-
 # 최종 이유 카드 LLM이 팀 하나에 대해 반환해야 하는 schema다.
 # 팀 이름, reason_cards, 호환용 reason 문자열을 검증한다.
 class FinalTeamReasonCards(BaseModel):
@@ -2206,8 +2171,6 @@ def get_final_team_analysis_prompt_chain():
     """
 
     user_prompt = """
-    final_teams:
-    {final_teams}
 
     reason_context:
     {reason_context}
@@ -2238,8 +2201,7 @@ def generate_final_team_analysis(final_teams, analyzed_students):
         structured_llm = llm.with_structured_output(FinalTeamAnalysisResult)
         chain = get_final_team_analysis_prompt_chain() | structured_llm
         response = chain.invoke({
-            "final_teams": json.dumps(reason_context, ensure_ascii=False, indent=2),
-            "reason_context": json.dumps(reason_context, ensure_ascii=False, indent=2),
+            "reason_context": json.dumps(reason_context, ensure_ascii=False, indent=0),
         })
         result = response.model_dump() if hasattr(response, "model_dump") else response
     except Exception:
@@ -2323,8 +2285,6 @@ def get_final_reason_cards_prompt_chain():
     """
 
     user_prompt = """
-    final_teams:
-    {final_teams}
 
     reason_context:
     {reason_context}
@@ -2340,7 +2300,7 @@ def get_final_reason_cards_prompt_chain():
 
 
 # 최종 팀 목록에 대해 LLM으로 배정 이유 카드를 생성한다.
-# 실패하면 reason을 비운 팀 목록을 반환하고, 성공하면 카드와 reason을 팀별로 병합한다.
+# LLM이 준 reason_cards/reason을 별도 보정 없이 팀별로 병합한다.
 def generate_final_reason_cards(final_teams, analyzed_students):
     try:
         reason_context = build_reason_card_context(final_teams, analyzed_students)
@@ -2348,12 +2308,11 @@ def generate_final_reason_cards(final_teams, analyzed_students):
         structured_llm = llm.with_structured_output(FinalReasonCardsResult)
         chain = get_final_reason_cards_prompt_chain() | structured_llm
         response = chain.invoke({
-            "final_teams": json.dumps(reason_context, ensure_ascii=False, indent=2),
-            "reason_context": json.dumps(reason_context, ensure_ascii=False, indent=2),
+            "reason_context": json.dumps(reason_context, ensure_ascii=False, indent=0),
         })
         result = response.model_dump() if hasattr(response, "model_dump") else response
     except Exception:
-        return clear_final_team_reasons(final_teams)
+        return get_candidate_teams(final_teams)
 
     cards_by_team = {
         team.get("team_name"): team
@@ -2364,13 +2323,8 @@ def generate_final_reason_cards(final_teams, analyzed_students):
     for team in get_candidate_teams(final_teams):
         fixed_team = dict(team)
         generated = cards_by_team.get(fixed_team.get("team_name"), {})
-        reason_cards = sanitize_llm_reason_cards(generated.get("reason_cards"))
-        reason = clean_reason_sections(generated.get("reason", ""))
-        if reason_cards and not reason:
-            reason = " ".join(card["description"] for card in reason_cards)
-
-        fixed_team["reason_cards"] = reason_cards
-        fixed_team["reason"] = reason
+        fixed_team["reason_cards"] = generated.get("reason_cards") or []
+        fixed_team["reason"] = generated.get("reason", "")
         fixed_teams.append(fixed_team)
 
     return fixed_teams
@@ -2499,7 +2453,7 @@ def save_workflow_result(result):
     save_matching_result(public_result)
     output_path = Path(__file__).resolve().parents[1] / "data/student_analysis_data/matching_output.json"
     with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(public_result, f, ensure_ascii=False, indent=2)
+        json.dump(public_result, f, ensure_ascii=False, indent=0)
 
 
 # force_rematch 설정을 보고 기존 매칭 결과 캐시를 읽을지 결정한다.
@@ -2769,4 +2723,4 @@ def run_workflow(force_rematch=False):
 
 if __name__ == "__main__":
     result = run_workflow()
-    print(json.dumps(result.get("final_result", result), ensure_ascii=False, indent=2))
+    print(json.dumps(result.get("final_result", result), ensure_ascii=False, indent=0))
