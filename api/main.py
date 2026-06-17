@@ -612,8 +612,8 @@ def run_analysis(students: Optional[List[Dict[str, Any]]] = Body(default=None)):
 # force_rematch=True로 캐시를 무시하고 새 추천안을 만든 뒤 요약 응답을 반환한다.
 def run_matching(payload: Any = Body(default=None)):
     from student_analysis.analysis_llm import get_analyze_stu
-    # from matching_student.workflow_matching_student import run_workflow #open_ai_api로 할때 이거 밑에 주석치고 이거하셈
-    from matching_student.upstage_matching import run_regenerate_workflow, run_workflow
+    from matching_student.workflow_matching_student import run_regenerate_workflow, run_workflow #open_ai_api로 할때 이거 밑에 주석치고 이거하셈
+    # from matching_student.upstage_matching import run_regenerate_workflow, run_workflow
 
     matching_request = parse_matching_request(payload)
     request_students = normalize_request_students(matching_request["students"])
