@@ -56,6 +56,18 @@ def _as_list(value: Any) -> List[Any]:
     return [loaded]
 
 
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (bytes, bytearray)):
+        return any(byte != 0 for byte in value)
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes", "y", "팀장", "원함"}
+    return False
+
+
 def _normalize_student(row: Dict[str, Any]) -> Dict[str, Any]:
     payload = None
     for key in ("student_data", "payload", "data", "json_data", "raw_json"):
@@ -78,6 +90,16 @@ def _normalize_student(row: Dict[str, Any]) -> Dict[str, Any]:
     experience = student.get("experience", row.get("experience"))
     student["experience"] = _as_list(experience)
     student["collaboration"] = int(student.get("collaboration", row.get("collaboration", 0)) or 0)
+    student["preferred_members"] = _as_list(
+        student.get("preferred_members")
+        or student.get("preferredMembers")
+        or row.get("preferred_members")
+    )
+    student["wants_leader"] = _as_bool(
+        student.get("wants_leader")
+        if "wants_leader" in student
+        else student.get("wantsLeader", row.get("wants_leader"))
+    )
 
     return student
 

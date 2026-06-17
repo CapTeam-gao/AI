@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Literal, Optional
 
 from capteam_db import fetch_analysis_results, fetch_students, save_analysis_results
-from capteam_preferences import ensure_preference_profile
+from capteam_preferences import ensure_preference_profile, ensure_preference_profiles
 from capteam_traits import ensure_trait_profile
 
 # store = {}
@@ -346,7 +346,28 @@ def normalize_analysis(response, student):
 
     # 설문 성향 점수는 LLM 응답과 무관하게 원본 입력 기준으로 정규화해서 항상 포함한다.
     trait_result = ensure_trait_profile(result, source=student)
-    return ensure_preference_profile({**student, **trait_result})
+    student_user_id = (
+        student.get("user_id")
+        or student.get("userId")
+        or student.get("student_id")
+        or student.get("studentId")
+    )
+    merged_result = {
+        **student,
+        **trait_result,
+        "user_id": student_user_id,
+        "preferred_members": (
+            student.get("preferred_members")
+            or student.get("preferredMembers")
+            or trait_result.get("preferred_members", [])
+        ),
+        "wants_leader": (
+            student.get("wants_leader")
+            if "wants_leader" in student
+            else student.get("wantsLeader", trait_result.get("wants_leader", False))
+        ),
+    }
+    return ensure_preference_profile(merged_result)
 
 
 def _get_cached_analysis_for_students(
@@ -366,10 +387,10 @@ def _get_cached_analysis_for_students(
     if not student_names or any(name not in cached_by_name for name in student_names):
         return None
 
-    return [
+    return ensure_preference_profiles([
         normalize_analysis(cached_by_name[student.get("name")], student)
         for student in students
-    ]
+    ])
 
 
 def get_analyze_stu(students: Optional[List[Dict[str, Any]]] = None):
@@ -415,6 +436,7 @@ def get_analyze_stu(students: Optional[List[Dict[str, Any]]] = None):
         #리스트만들어서 답변나오면 그리스트 안에 들어가는 형식으로 이 만든걸 matching하는 llm에게 넘김.
         # 분석 결과 저장
 
+    results = ensure_preference_profiles(results)
     save_analysis_results(results)
 
     print("분석 결과 MySQL 저장 완료")
