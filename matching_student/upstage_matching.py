@@ -2100,43 +2100,6 @@ def build_reason_card_context(final_teams, analyzed_students):
     return contexts
 
 
-# 최종 팀 목록에서 reason_cards와 reason을 빈 값으로 초기화한다.
-# 이유 생성 LLM 실패 시 fallback으로 카드 없이 반환하기 위해 사용한다.
-def clear_final_team_reasons(final_teams):
-    fixed_teams = []
-    for team in get_candidate_teams(final_teams):
-        fixed_team = dict(team)
-        fixed_team["reason_cards"] = []
-        fixed_team["reason"] = ""
-        fixed_teams.append(fixed_team)
-
-    return fixed_teams
-
-
-# LLM이 만든 reason_cards를 title/description만 남겨 정리한다.
-# 잘못된 카드 형식은 건너뛰고 최소 2개, 최대 3개 카드까지 반환한다.
-def sanitize_llm_reason_cards(cards: Any) -> List[Dict[str, str]]:
-    if not isinstance(cards, list):
-        return []
-
-    sanitized_cards = []
-    for card in cards:
-        if not isinstance(card, dict):
-            continue
-
-        title = (card.get("title") or "").strip()
-        description = clean_reason_sections((card.get("description") or "").strip())
-        if not title or not description:
-            continue
-
-        sanitized_cards.append({
-            "title": title,
-            "description": description,
-        })
-
-    return sanitized_cards[:3]
-
-
 # 최종 이유 카드 LLM이 팀 하나에 대해 반환해야 하는 schema다.
 # 팀 이름, reason_cards, 호환용 reason 문자열을 검증한다.
 class FinalTeamReasonCards(BaseModel):
@@ -2200,8 +2163,6 @@ def get_final_team_analysis_prompt_chain():
     """
 
     user_prompt = """
-    final_teams:
-    {final_teams}
 
     reason_context:
     {reason_context}
@@ -2232,7 +2193,6 @@ def generate_final_team_analysis(final_teams, analyzed_students):
         structured_llm = llm.with_structured_output(FinalTeamAnalysisResult)
         chain = get_final_team_analysis_prompt_chain() | structured_llm
         response = chain.invoke({
-            "final_teams": json.dumps(reason_context, ensure_ascii=False, indent=2),
             "reason_context": json.dumps(reason_context, ensure_ascii=False, indent=2),
         })
         result = response.model_dump() if hasattr(response, "model_dump") else response
@@ -2317,8 +2277,6 @@ def get_final_reason_cards_prompt_chain():
     """
 
     user_prompt = """
-    final_teams:
-    {final_teams}
 
     reason_context:
     {reason_context}
@@ -2334,7 +2292,7 @@ def get_final_reason_cards_prompt_chain():
 
 
 # 최종 팀 목록에 대해 LLM으로 배정 이유 카드를 생성한다.
-# 실패하면 reason을 비운 팀 목록을 반환하고, 성공하면 카드와 reason을 팀별로 병합한다.
+# LLM이 준 reason_cards/reason을 별도 보정 없이 팀별로 병합한다.
 def generate_final_reason_cards(final_teams, analyzed_students):
     try:
         reason_context = build_reason_card_context(final_teams, analyzed_students)
@@ -2342,12 +2300,11 @@ def generate_final_reason_cards(final_teams, analyzed_students):
         structured_llm = llm.with_structured_output(FinalReasonCardsResult)
         chain = get_final_reason_cards_prompt_chain() | structured_llm
         response = chain.invoke({
-            "final_teams": json.dumps(reason_context, ensure_ascii=False, indent=2),
             "reason_context": json.dumps(reason_context, ensure_ascii=False, indent=2),
         })
         result = response.model_dump() if hasattr(response, "model_dump") else response
     except Exception:
-        return clear_final_team_reasons(final_teams)
+        return get_candidate_teams(final_teams)
 
     cards_by_team = {
         team.get("team_name"): team
@@ -2358,13 +2315,8 @@ def generate_final_reason_cards(final_teams, analyzed_students):
     for team in get_candidate_teams(final_teams):
         fixed_team = dict(team)
         generated = cards_by_team.get(fixed_team.get("team_name"), {})
-        reason_cards = sanitize_llm_reason_cards(generated.get("reason_cards"))
-        reason = clean_reason_sections(generated.get("reason", ""))
-        if reason_cards and not reason:
-            reason = " ".join(card["description"] for card in reason_cards)
-
-        fixed_team["reason_cards"] = reason_cards
-        fixed_team["reason"] = reason
+        fixed_team["reason_cards"] = generated.get("reason_cards") or []
+        fixed_team["reason"] = generated.get("reason", "")
         fixed_teams.append(fixed_team)
 
     return fixed_teams
