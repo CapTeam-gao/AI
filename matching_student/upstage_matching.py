@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", "..", ".env"), override=False)
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"), override=True)
 
-from capteam_db import fetch_analysis_results, fetch_matching_result, save_matching_result
+from capteam_db import fetch_analysis_results, fetch_matching_result, fetch_students, save_matching_result
 
 from capteam_preferences import (
     breaks_preference_constraints,
@@ -20,6 +20,7 @@ from capteam_preferences import (
     choose_preference_aware_leader,
     ensure_preference_profile,
     ensure_preference_profiles,
+    get_preferred_members,
     preference_bonus,
     team_preference_notes,
 )
@@ -36,6 +37,8 @@ from capteam_traits import (
     get_trait_score,
 )
 #역할을 다양하게 균형 잡힌 팀 1순위 , 선호팀원 2순위 
+# Upstage Chat 모델 객체를 생성해서 반환한다.
+# model 이름을 입력받고, 환경변수 base_url과 낮은 temperature 설정을 적용한다.
 def get_llm(model = "solar-pro3"):
     return ChatUpstage(
         model=model,
@@ -45,6 +48,8 @@ def get_llm(model = "solar-pro3"):
 
 
 #state
+# LangGraph 워크플로우에서 노드들이 공유하는 상태 구조다.
+# 학생 분석, 팀 초안, 검증 결과, 조정 기록, 최종 결과를 저장한다.
 class MatchingState(TypedDict):
     analyzed_students : List[Dict[str,Any]] #학생 분석결과 들고와서 매칭할때 사용
     teams : List[Dict[str,Any]] #현재 팀 매칭상태 저장
@@ -75,16 +80,47 @@ ROLE_GROUPS_TO_KEEP_TOGETHER = {"game"}
 
 
 #node
+# 최신 설문 원본의 선호 팀원/팀장 희망을 분석 결과에 덮어쓴다.
+# 분석 캐시가 있어도 새 설문 선호가 매칭에 빠지지 않게 보정한다.
+def merge_latest_preferences(analyzed_students: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    try:
+        source_students = fetch_students()
+    except Exception:
+        source_students = []
+
+    source_by_name = {
+        student.get("name"): student
+        for student in source_students
+        if student.get("name")
+    }
+    merged_students = []
+    for student in analyzed_students:
+        source = source_by_name.get(student.get("name"))
+        if source:
+            merged = {
+                **student,
+                "preferred_members": source.get("preferred_members", student.get("preferred_members", [])),
+                "wants_leader": source.get("wants_leader", student.get("wants_leader", False)),
+            }
+        else:
+            merged = dict(student)
+        merged_students.append(merged)
+
+    return ensure_preference_profiles([ensure_trait_profile(student) for student in merged_students])
+
+
+# MySQL, analysis_output.json, matching_output.json 순서로 학생 분석 결과를 읽는다.
+# 읽은 학생 데이터에는 성향/선호 프로필을 보강해서 매칭 입력으로 반환한다.
 def load_analysis_output_json():
     results = fetch_analysis_results()
     if results:
-        return ensure_preference_profiles([ensure_trait_profile(student) for student in results])
+        return merge_latest_preferences(results)
 
     input_path = Path(__file__).resolve().parents[1] / "data/student_analysis_data/analysis_output.json"
     if input_path.exists() and input_path.stat().st_size > 0:
         try:
             with open(input_path, "r", encoding="utf-8") as f:
-                return ensure_preference_profiles([ensure_trait_profile(student) for student in json.load(f)])
+                return merge_latest_preferences(json.load(f))
         except json.JSONDecodeError:
             pass
 
@@ -94,7 +130,7 @@ def load_analysis_output_json():
             matching_output = json.load(f)
         analyzed_students = matching_output.get("analyzed_students", [])
         if analyzed_students:
-            return ensure_preference_profiles([ensure_trait_profile(student) for student in analyzed_students])
+            return merge_latest_preferences(analyzed_students)
 
     raise RuntimeError("MySQL, analysis_output.json, matching_output.json에 학생 분석 결과가 없습니다. student_analysis.analysis_llm을 먼저 실행하세요.")
 
@@ -102,6 +138,8 @@ def load_analysis_output_json():
 #일단 파일불러와서 프롬포트 작성과 알고리즘으로 팀 생성 team에 저장
 
 #정규표현식으로 학생분석데이터에서 숫자만 뽑아서 평균을 계산함
+# "기술명: n점" 형태의 stack_score에서 숫자 점수만 뽑아 평균을 낸다.
+# 점수가 없으면 기술 스택 보조 점수 0을 반환한다.
 def parse_stack_score(stack_score):
     # stack_score는 "python: 7점\nfastapi: 7점" 같은 문자열 형태라서
     # 정규식으로 숫자만 뽑고 평균을 계산함.
@@ -112,6 +150,8 @@ def parse_stack_score(stack_score):
 
 #여기 수정해야함
 #여기 점수 계산 로직 이거 수정해야할듯 지금 구조가 너무 점수에 의존하는 구조인데 지금 그냥 평균내거나 곱해서 그냥 점수 계산하니까 성능이 좀 많이 안좋아짐.
+# 학생 분석 결과를 받아 매칭용 기술 점수를 계산한다.
+# skill_level 기본점수에 stack_score 평균을 더해 기술 역량 기준값을 만든다.
 def get_technical_score(student):
     # 학생 한 명의 기술 점수 계산.
     # skill_level을 큰 기준으로 보고, stack_score 평균을 보조 점수로 더함.
@@ -122,6 +162,8 @@ def get_technical_score(student):
     return level_score * 10 + stack_score
 
 
+# 학생 분석 결과를 받아 최종 배치용 학생 점수를 계산한다.
+# 기술 점수 70%와 성향 점수 30%를 합쳐 팀 균형 계산에 사용한다.
 def get_student_score(student):
     # 최종 매칭 점수는 기술 70%, 성향 30%로 계산한다.
     technical_score = get_technical_score(student)
@@ -132,6 +174,8 @@ def get_student_score(student):
 
 #학생의 희망 역할을 큰 카테고리로 바꾸어줌
 #같은 분야에 사람이 한팀에 많이 들어오지 않게 하기 위해서
+# 자유 입력 역할 문자열을 매칭용 role_group으로 분류한다.
+# 프론트/백엔드/AI/앱/디자인/게임/기타 중 하나를 반환한다.
 def get_role_group(role):
     # role은 "Frontend Developer", "백엔드 개발자", "AI 엔지니어"처럼 표현이 제각각이라
     # 큰 역할군으로 묶어서 한 팀에 같은 역할이 몰리지 않게 할 때 사용함.
@@ -152,21 +196,25 @@ def get_role_group(role):
     return "etc"
 
 
+# 학생 원본 분석 dict를 팀 배치에 필요한 요약 dict로 변환한다.
+# 기술점수, 성향점수, 역할군, 선호팀원, 리더점수 등 핵심 필드를 채운다.
 def make_student_summary(student):
     # 팀 생성에 필요한 정보만 추린 학생 요약 데이터.
     # 원본 분석 결과 전체를 teams에 넣으면 너무 길어져서 핵심 필드만 저장함.
     student = ensure_preference_profile(ensure_trait_profile(student))
+    role = student.get("role") or student.get("goal")
     technical_score = round(get_technical_score(student), 2)
     trait_score = round(get_trait_score(student), 2)
     matching_score = round(get_student_score(student), 2)
     return {
+        "user_id": student.get("user_id") or student.get("userId") or student.get("student_id"),
         "name": student.get("name"),
         "skill_level": student.get("skill_level"),
         "score": matching_score,
         "technical_score": technical_score,
         "trait_score": trait_score,
-        "role": student.get("role"), #학생이 원하는 역할 
-        "role_group": get_role_group(student.get("role")), #팀에서 할 역할
+        "role": role, #학생이 원하는 역할 
+        "role_group": get_role_group(role), #팀에서 할 역할
         "stack_score": student.get("stack_score", ""),
         "experience": student.get("experience", []),
         "strength": student.get("strength"),
@@ -186,6 +234,18 @@ def make_student_summary(student):
     }
 
 
+# 팀에 학생을 실제로 추가하고 점수/역할 분포를 갱신한다.
+# 선호 기반 채우기와 기존 순차 배치가 같은 추가 로직을 쓰도록 분리했다.
+def add_student_to_team(team, student):
+    team["members"].append(student)
+    team["total_score"] += student["score"]
+    team["role_groups"][student["role_group"]] = (
+        team["role_groups"].get(student["role_group"], 0) + 1
+    )
+
+
+# 전체 학생 수와 목표 팀 크기를 받아 팀별 목표 인원 목록을 만든다.
+# 팀 인원 차이가 최대 1명만 나도록 capacity 리스트를 반환한다.
 def build_team_capacities(total_students, target_team_size=5):
     if total_students <= 0:
         return []
@@ -200,10 +260,14 @@ def build_team_capacities(total_students, target_team_size=5):
     ]
 
 
+# 전체 학생 수 기준으로 3명 팀이 구조적으로 피할 수 없는지 확인한다.
+# 팀 capacity 계산 결과에 3이 있으면 True를 반환한다.
 def is_three_person_team_unavoidable(total_students):
     return any(capacity == 3 for capacity in build_team_capacities(total_students))
 
 
+# 팀 capacity 목록을 받아 빈 팀 dict 목록을 만든다.
+# 각 팀에는 이름, 멤버 목록, 총점, 역할 분포, 목표 인원이 초기화된다.
 def make_empty_teams(team_capacities):
     # 실제 학생을 넣기 전에 빈 팀 틀을 먼저 만든다.
     # total_score는 팀 실력 합계, role_groups는 역할군 분포 기록용.
@@ -222,6 +286,8 @@ def make_empty_teams(team_capacities):
     ]
     #team_count만큼 팀 생성
 
+# 학생 한 명을 현재 팀들 중 어느 팀에 넣을지 선택한다.
+# 선호팀원, 역할 다양성, 인원수, 성향 보완, 팀 총점을 기준으로 가장 적합한 팀을 반환한다.
 def choose_team_for_student(teams, student):
     # 현재 학생을 어느 팀에 넣을지 고르는 함수.
     # 우선순위:
@@ -235,6 +301,8 @@ def choose_team_for_student(teams, student):
         if len(team["members"]) < team.get("capacity", 5) #팀에 members수가 팀 목표 인원보다 적으면
     ]
 
+    # 후보 팀에 학생을 넣었을 때 성향 약점이 반복되는 정도를 계산한다.
+    # 낮은 성향이 높은 성향으로 보완되면 penalty를 낮춰 팀 선택에 유리하게 만든다.
     def trait_penalty(team):
         members = team.get("members", [])
         low_traits = get_low_trait_names(student)
@@ -245,6 +313,8 @@ def choose_team_for_student(teams, student):
         complemented_count = len((low_traits & member_high_traits) | (high_traits & member_low_traits))
         return repeated_low_count - complemented_count
 
+    # 선호 팀원 보너스를 적용하되 인원 균형이나 제약을 깨면 0으로 처리한다.
+    # 현재 팀 멤버와의 선호 관계가 안전하게 유지될 때만 preference_bonus를 반환한다.
     def safe_preference_bonus(team):
         members = team.get("members", [])
         bonus = preference_bonus(student, members)
@@ -266,6 +336,8 @@ def choose_team_for_student(teams, student):
 
         return bonus
 
+    # 역할군 배치 우선순위를 계산한다.
+    # 일반 역할은 다양성을 우선하고, game 역할군은 같은 팀에 모이도록 반대로 계산한다.
     def role_group_priority(team):
         current_count = team["role_groups"].get(role_group, 0)
         if role_group in ROLE_GROUPS_TO_KEEP_TOGETHER:
@@ -276,7 +348,7 @@ def choose_team_for_student(teams, student):
         available_teams,
         key=lambda team: ( #tuple이여서 위에서 아래순으로 우선순위를 따짐
             -safe_preference_bonus(team),
-            role_group_priority(team),#기본은 역할 다양성, game은 같은 역할군이 있는 팀 우선.
+            role_group_priority(team), #기본은 역할 다양성, game은 같은 역할군이 있는 팀 우선.
             len(team["members"]), #팀 인원 ,팀 인원이 적은 팀 우선.
             trait_penalty(team),
             team["total_score"], #팀 총합 스코어는 마지막 보조 기준으로 사용.
@@ -284,6 +356,183 @@ def choose_team_for_student(teams, student):
     )
 
 
+# 선호 정보가 있는 데이터에서 한 팀에 넣을 다음 학생을 고른다.
+# 현재 팀원과 서로 선호 관계가 있으면 최우선으로 보고, 그다음 역할 다양성과 점수를 본다.
+def choose_preference_candidate_for_team(team, candidates):
+    members = team.get("members", [])
+    role_groups = team.get("role_groups", {})
+
+    def candidate_key(candidate):
+        role_count = role_groups.get(candidate["role_group"], 0)
+        return (
+            -preference_bonus(candidate, members),
+            role_count,
+            -candidate["score"],
+        )
+
+    return min(candidates, key=candidate_key)
+
+
+# 선호 팀원 입력이 있는 경우 팀 내부를 선호 연결 중심으로 먼저 채운다.
+# 한 팀을 채울 때 현재 팀원과 연결된 학생을 우선 선택해 선호 반영률을 높인다.
+def create_preference_seeded_teams(student_summaries, team_capacities):
+    teams = make_empty_teams(team_capacities)
+    unassigned = list(student_summaries)
+
+    for team in teams:
+        while unassigned and len(team["members"]) < team.get("capacity", 5):
+            if not team["members"]:
+                candidate = unassigned.pop(0)
+            else:
+                candidate = choose_preference_candidate_for_team(team, unassigned)
+                unassigned.remove(candidate)
+
+            add_student_to_team(team, candidate)
+
+    return teams
+
+
+# 팀 목록에서 같은 팀에 들어간 선호 관계 수를 계산한다.
+# 값이 높을수록 학생들이 선택한 preferred_members가 더 많이 반영된 팀 구성이다.
+def count_preference_hits(teams):
+    team_by_student = {}
+    for index, team in enumerate(teams):
+        for member in team.get("members", []):
+            if member.get("name"):
+                team_by_student[member["name"]] = index
+
+    return sum(
+        1
+        for team in teams
+        for member in team.get("members", [])
+        for preferred_name in get_preferred_members(member)
+        if team_by_student.get(member.get("name")) == team_by_student.get(preferred_name)
+    )
+
+
+# 팀별 역할 다양성 합계를 계산한다.
+# 선호 반영 수가 같을 때 한 역할군으로 쏠리는 배치를 피하기 위한 보조 기준이다.
+def count_role_diversity(teams):
+    return sum(
+        len({
+            member.get("role_group")
+            for member in team.get("members", [])
+            if member.get("role_group")
+        })
+        for team in teams
+    )
+
+
+# 팀 점수 격차를 계산한다.
+# 선호 반영 수와 역할 다양성이 같을 때 점수 격차가 작은 배치를 고르는 보조 기준이다.
+def get_team_score_gap(teams):
+    scores = [
+        sum(member.get("score", 0) for member in team.get("members", []))
+        for team in teams
+    ]
+    if not scores:
+        return 0
+    return round(max(scores) - min(scores), 2)
+
+
+# 팀 배치를 비교하기 위한 점수 tuple을 만든다.
+# 역할 다양성과 점수 격차를 지키면서 선호 반영 수를 올리는 용도로 사용한다.
+def get_preference_layout_score(teams):
+    return (
+        count_preference_hits(teams),
+        count_role_diversity(teams),
+        -get_team_score_gap(teams),
+    )
+
+
+# 선호 최적화 swap이 팀 균형을 과하게 깨는지 확인한다.
+# 역할 다양성이 낮아지거나 점수 격차가 크게 벌어지는 교환은 적용하지 않는다.
+def keeps_team_balance(candidate_teams, baseline_score_gap, min_role_diversity):
+    score_gap = get_team_score_gap(candidate_teams)
+    role_diversity = count_role_diversity(candidate_teams)
+    allowed_score_gap = max(baseline_score_gap + 5, baseline_score_gap * 1.15)
+
+    if role_diversity < min_role_diversity:
+        return False
+    if score_gap > allowed_score_gap:
+        return False
+    return True
+
+
+# 학생 교환을 반복해 선호 반영 수가 늘어나는 팀 구성을 찾는다.
+# 팀 크기는 유지하고, 역할/점수 균형을 해치지 않는 swap만 적용한다.
+def optimize_teams_for_preferences(teams, max_passes=20):
+    if not teams or not any(
+        get_preferred_members(member)
+        for team in teams
+        for member in team.get("members", [])
+    ):
+        return teams
+
+    optimized_teams = copy.deepcopy(teams)
+    current_score = get_preference_layout_score(optimized_teams)
+    baseline_score_gap = get_team_score_gap(optimized_teams)
+    min_role_diversity = count_role_diversity(optimized_teams)
+
+    for _ in range(max_passes):
+        best_score = current_score
+        best_swap = None
+
+        for first_team_index in range(len(optimized_teams)):
+            for second_team_index in range(first_team_index + 1, len(optimized_teams)):
+                first_members = optimized_teams[first_team_index].get("members", [])
+                second_members = optimized_teams[second_team_index].get("members", [])
+
+                for first_member_index in range(len(first_members)):
+                    for second_member_index in range(len(second_members)):
+                        candidate_teams = copy.deepcopy(optimized_teams)
+                        candidate_teams[first_team_index]["members"][first_member_index], candidate_teams[second_team_index]["members"][second_member_index] = (
+                            candidate_teams[second_team_index]["members"][second_member_index],
+                            candidate_teams[first_team_index]["members"][first_member_index],
+                        )
+                        if not keeps_team_balance(candidate_teams, baseline_score_gap, min_role_diversity):
+                            continue
+                        candidate_score = get_preference_layout_score(candidate_teams)
+                        if candidate_score > best_score:
+                            best_score = candidate_score
+                            best_swap = (
+                                first_team_index,
+                                second_team_index,
+                                first_member_index,
+                                second_member_index,
+                            )
+
+        if best_swap is None:
+            break
+
+        first_team_index, second_team_index, first_member_index, second_member_index = best_swap
+        optimized_teams[first_team_index]["members"][first_member_index], optimized_teams[second_team_index]["members"][second_member_index] = (
+            optimized_teams[second_team_index]["members"][second_member_index],
+            optimized_teams[first_team_index]["members"][first_member_index],
+        )
+        current_score = best_score
+
+    return optimized_teams
+
+
+# 팀 멤버 변경 후 total_score와 role_groups를 다시 계산한다.
+# 선호 최적화 swap 이후 저장되는 팀 메타데이터가 실제 멤버와 맞게 한다.
+def refresh_team_stats(team):
+    role_groups = {}
+    total_score = 0
+    for member in team.get("members", []):
+        total_score += member.get("score", 0)
+        role_group = member.get("role_group")
+        if role_group:
+            role_groups[role_group] = role_groups.get(role_group, 0) + 1
+
+    team["total_score"] = round(total_score, 2)
+    team["role_groups"] = role_groups
+    return team
+
+
+# 분석된 학생 목록을 받아 LLM 전 1차 규칙 기반 팀 초안을 만든다.
+# 점수, 역할군, 성향 보완, 선호팀원을 고려해 팀 capacity에 맞게 배정한다.
 def create_initial_teams(analyzed_students, team_size=5, team_count=None):
     # 분석된 학생 리스트를 받아서 1차 팀 배정안을 만든다.
     # 이 단계는 LLM 없이 규칙 기반으로 빠르게 팀을 나누는 기본 틀이다.
@@ -306,26 +555,28 @@ def create_initial_teams(analyzed_students, team_size=5, team_count=None):
         for student in analyzed_students #analyzed_student for문 돌려서 student에 넣음
     ]
 
-    # 점수가 높은 학생부터 배치하되, 함께 배치해야 하는 역할군은 먼저 배치해 자리를 확보한다.
-    sorted_students = sorted(
-        student_summaries,#정렬할 데이터
-        key=lambda student: (
-            student["role_group"] in ROLE_GROUPS_TO_KEEP_TOGETHER,
-            student["score"],
-        ),#key = 정렬기준, 우선 묶음 역할군과 score를 기준으로 내림차순
-        reverse=True, #내림차순
-    )
-
-    for student in sorted_students:
-        team = choose_team_for_student(teams, student) #어떤 팀에 넣을지 정하는 함수에서 변수 넣어줌
-        team["members"].append(student) #선택된 맴버 리스트에 학생추가
-        team["total_score"] += student["score"] #현재 학생score를 팀 스코어에 더함
-        team["role_groups"][student["role_group"]] = ( #학생역할의 value값을 팀 총팀인원 역할에 더해줌
-            team["role_groups"].get(student["role_group"], 0) + 1
+    has_preferences = any(student.get("preferred_members") for student in student_summaries)
+    if has_preferences:
+        teams = create_preference_seeded_teams(student_summaries, team_capacities)
+    else:
+        # 점수가 높은 학생부터 배치하되, 함께 배치해야 하는 역할군은 먼저 배치해 자리를 확보한다.
+        sorted_students = sorted(
+            student_summaries,#정렬할 데이터
+            key=lambda student: (
+                student["role_group"] in ROLE_GROUPS_TO_KEEP_TOGETHER,
+                student["score"],
+            ),#key = 정렬기준, 우선 묶음 역할군과 score를 기준으로 내림차순
+            reverse=True, #내림차순
         )
 
+        for student in sorted_students:
+            team = choose_team_for_student(teams, student) #어떤 팀에 넣을지 정하는 함수에서 변수 넣어줌
+            add_student_to_team(team, student)
+
+    teams = optimize_teams_for_preferences(teams)
+
     for team in teams: #모든 팀 순회해서
-        team["total_score"] = round(team["total_score"], 2)
+        refresh_team_stats(team)
         leader = choose_preference_aware_leader(team["members"])
         team["leader"] = leader.get("name", "")
         team["leader_score"] = get_leader_score(leader) if leader else 0
@@ -334,12 +585,15 @@ def create_initial_teams(analyzed_students, team_size=5, team_count=None):
         team["development_averages"] = calculate_trait_averages(team["members"], "development_scores")
         team["trait_risks"] = build_team_trait_risks(team["members"])
         team["preference_notes"] = team_preference_notes(team["members"])
+        team["matching_evidence"] = build_team_matching_evidence(team)
     #팀 점수를 소수점 둘째 자리까지 반올림.
     return teams
 
 #llm
 #LLM = 자연어 분석 기반 팀 조합 보정
 #검증 코드 = LLM 실수 방지
+# 학생 분석 목록에서 유효한 이름만 뽑아 리스트로 반환한다.
+# LLM이 없는 이름을 만들지 못하게 allowed_student_names 입력으로 사용한다.
 def get_student_names(students):
     # LLM이 이름을 새로 만들거나 오타를 내는 것을 줄이기 위해 원본 이름만 따로 넘긴다.
     return [student.get("name") for student in students if student.get("name")] #리스트 컴프리헨션
@@ -356,10 +610,14 @@ REASON_ROLE_LABELS = {
 }
 
 
+# role_group 값을 배정 이유 문장에 사용할 한국어 라벨로 바꾼다.
+# 알 수 없는 값은 원래 값이나 기타로 반환한다.
 def get_reason_role_label(role_group: str) -> str:
     return REASON_ROLE_LABELS.get(role_group or "", role_group or "기타")
 
 
+# stack_score 문자열에서 점수 높은 기술명만 추출한다.
+# 배정 이유 context에 넣을 대표 기술 목록을 limit개 반환한다.
 def parse_reason_stack_names(stack_score: str, limit: int = 2) -> List[str]:
     scored_stacks = []
 
@@ -370,6 +628,8 @@ def parse_reason_stack_names(stack_score: str, limit: int = 2) -> List[str]:
     return [stack for stack, _ in scored_stacks[:limit]]
 
 
+# 학생 한 명의 높은/낮은 성향 목록을 이유 생성용으로 요약한다.
+# matching_traits에서 high_traits, low_traits를 최대 4개씩 반환한다.
 def summarize_reason_traits(member: Dict[str, Any]) -> Dict[str, Any]:
     matching_traits = member.get("matching_traits", {})
     return {
@@ -378,6 +638,8 @@ def summarize_reason_traits(member: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+# 팀원들 사이에서 낮은 성향을 높은 성향이 보완하는 관계를 찾는다.
+# 이유 생성 LLM에 넘길 trait, low_member, supporters 목록을 만든다.
 def build_trait_complements(members: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     complements = []
 
@@ -411,6 +673,8 @@ def build_trait_complements(members: List[Dict[str, Any]]) -> List[Dict[str, Any
     return complements[:6]
 
 
+# 후보 팀 결과와 학생 분석을 받아 이유 생성/보정용 팀 context를 만든다.
+# 팀별 멤버, 역할 분포, 대표 기술, 성향 보완 관계, 성향 평균을 담아 반환한다.
 def build_reason_context(candidate_result, analyzed_students):
     student_lookup = build_student_lookup(analyzed_students)
     contexts = []
@@ -424,6 +688,10 @@ def build_reason_context(candidate_result, analyzed_students):
         for member in members:
             role_group = member.get("role_group") or get_role_group(member.get("role"))
             role_counts[role_group] = role_counts.get(role_group, 0) + 1
+        matching_evidence = team.get("matching_evidence") or build_team_matching_evidence({
+            **team,
+            "members": members,
+        })
 
         contexts.append({
             "team_name": team.get("team_name"),
@@ -451,16 +719,22 @@ def build_reason_context(candidate_result, analyzed_students):
     return contexts
 
 #팀 구성 TeamMatchingResult에 final_teams에 list로 들어감.
+# LLM structured output에서 역할군별 인원 수를 표현하는 schema다.
+# role_group 이름과 count를 받아 FinalTeam.role_groups에 들어간다.
 class RoleGroupCount(BaseModel):
     role_group: str = Field(description="역할군 이름. 예: frontend, backend, ai_data, game, etc")
     count: int = Field(description="해당 역할군 인원 수")
 
 
+# 화면에 보여줄 배정 이유 카드 schema다.
+# title과 description을 받아 final team reason_cards에 저장한다.
 class ReasonCard(BaseModel):
     title: str = Field(description="화면에 보여줄 배정 이유 카드 제목")
     description: str = Field(description="카드 제목에 맞는 2~3문장의 구체적인 팀 배정 이유 설명")
 
 
+# LLM이 반환해야 하는 최종 팀 한 개의 schema다.
+# 팀 이름, 멤버 이름, 총점, 역할 분포, 팀장, 이유 필드를 검증한다.
 class FinalTeam(BaseModel):
     team_name: str = Field(description="팀 이름")
     members: List[str] = Field(description="팀원 이름 목록")
@@ -471,6 +745,8 @@ class FinalTeam(BaseModel):
     reason: str = Field(default="", description="최종 확정 후 별도 생성되는 호환용 요약 설명")
 
 #팀 매칭할때 변경되었는거 알려주는
+# 팀 매칭 LLM의 전체 structured output schema다.
+# 최종 팀 목록과 변경 여부, 변경 요약, 검증 메모를 담는다.
 class TeamMatchingResult(BaseModel):
     final_teams: List[FinalTeam] = Field(description="최종 팀 매칭 결과")
     changed: bool = Field(description="initial_teams에서 팀원이 바뀌었으면 true")
@@ -479,6 +755,8 @@ class TeamMatchingResult(BaseModel):
 
 
 
+# 1차 팀 초안을 LLM이 최소 보정하도록 하는 프롬프트 chain을 만든다.
+# 학생 분석, allowed names, initial teams, reason context를 입력받는 템플릿을 반환한다.
 def get_matching_prompt_chain():
     system_prompt = """
 당신은 캡스톤 프로젝트 팀 매칭을 보정하는 전문가다.
@@ -556,6 +834,8 @@ reason_context:
     )
     #프롬포트에 딱히 문제될건 없는거 같음.
 
+# LangGraph에서 1차 알고리즘 팀을 LLM에게 보내 최소 보정을 받는 노드다.
+# state/analyzed_students를 입력받아 teams와 repair된 llm_result를 반환한다.
 def llm_analyzed(state: MatchingState, analyzed_students=None):
     # 1차 알고리즘 팀 생성 이후 LLM에게 자연어 분석 기반 보정을 요청한다.
     if analyzed_students is None: #ananlyzed_student변수가 안들어오면 
@@ -594,6 +874,8 @@ def llm_analyzed(state: MatchingState, analyzed_students=None):
 #팀장하고 선호팀원 받아야하는데 선호팀원이 좀 빡셀듯. 선호팀원을 너무 잘하는사람끼리 모여있으면 선호팀원 안되게 할지 이거 내일 물어볼거. 아니면 그냥일단 다 배치 할지.
 #그리고 몇몇 팀은 괜찮고 몇몇 팀은 별로일때 별로인 팀만 바꾸는 걸 만들어도 괜찮을듯
 
+# LangGraph에서 1차 규칙 기반 팀 생성을 담당하는 노드다.
+# state의 analyzed_students를 입력받아 생성된 teams만 업데이트 값으로 반환한다.
 def create_team_node(state: MatchingState) -> Dict[str, Any]:
     # LangGraph에서 사용할 팀 생성 노드.
     # 입력 state에서 analyzed_students를 꺼내 1차 팀을 만들고,
@@ -619,6 +901,8 @@ def create_team_node(state: MatchingState) -> Dict[str, Any]:
 #llm_result 또는 teams를 가져와서 전체 평가 결과는 balance_result에,
 #팀별 평가 결과는 team_evaluations에 저장한다.
 #이 알고리즘이 위에 llm이 팀 생성한 것을 다시 알고리즘으로 잘했는지 검증함
+# LLM 결과 dict나 알고리즘 팀 list에서 실제 팀 목록만 꺼낸다.
+# candidate_result 형태가 달라도 이후 검증 함수가 같은 리스트로 처리하게 만든다.
 def get_candidate_teams(candidate_result):
     # structured output 결과는 {"final_teams": [...]} 형태이고,
     # 알고리즘 초안은 바로 팀 리스트 형태라서 둘 다 받을 수 있게 정리한다.
@@ -630,6 +914,8 @@ def get_candidate_teams(candidate_result):
 
 
 
+# 팀 dict의 members에서 학생 이름만 추출한다.
+# members가 dict 목록이든 문자열 목록이든 이름 문자열 리스트로 변환한다.
 def get_member_names(team):
     # 알고리즘 초안의 members는 dict 리스트, LLM 결과의 members는 이름 문자열 리스트다.
     # 검증에서는 이름만 필요하므로 같은 형태로 맞춘다.
@@ -642,6 +928,8 @@ def get_member_names(team):
     return [name for name in member_names if name] #member_name을 순회해서 name에 넣은 다음 name에 빈값없으면추가
 
 
+# 분석된 학생 목록을 이름 기준 lookup dict로 만든다.
+# 값은 make_student_summary 결과라 점수/역할/성향 정보를 빠르게 조회할 수 있다.
 def build_student_lookup(analyzed_students):
     # 학생 이름으로 score, skill_level, role_group을 빠르게 찾기 위한 dict.
     return {
@@ -651,6 +939,8 @@ def build_student_lookup(analyzed_students):
     }
 
 
+# 팀 하나의 현재 상태를 학생 lookup 기준으로 다시 계산한다.
+# 멤버 수, 총점, 역할 분포, 실력 분포, 성향 평균, 리스크를 반환한다.
 def calculate_team_status(team, student_lookup):
     # 팀원 이름 목록을 기준으로 실제 총점과 역할 분포를 다시 계산한다.
     member_names = get_member_names(team) #이름 가져와서 member_names에 저장
@@ -689,6 +979,36 @@ def calculate_team_status(team, student_lookup):
     }
 
 
+# 후보 팀에서 학생별 선호 팀원이 같은 팀에 배치됐는지 확인한다.
+# 미반영 선호 목록은 검증 단계에서 조정 노드로 보내기 위한 근거로 사용한다.
+def find_unmet_preference_pairs(candidate_teams, analyzed_students):
+    team_by_student = {}
+    for team in get_candidate_teams(candidate_teams):
+        for member_name in get_member_names(team):
+            team_by_student[member_name] = team.get("team_name")
+
+    unmet_pairs = []
+    for student in analyzed_students:
+        student_name = student.get("name")
+        student_team = team_by_student.get(student_name)
+        if not student_name or not student_team:
+            continue
+
+        for preferred_name in get_preferred_members(student):
+            preferred_team = team_by_student.get(preferred_name)
+            if preferred_team and preferred_team != student_team:
+                unmet_pairs.append({
+                    "student": student_name,
+                    "preferred_member": preferred_name,
+                    "student_team": student_team,
+                    "preferred_team": preferred_team,
+                })
+
+    return unmet_pairs
+
+
+# 함께 유지해야 하는 role_group이 여러 팀으로 쪼개졌는지 찾는다.
+# team_evaluations를 입력받아 분리된 role_group 목록을 반환한다.
 def find_split_keep_together_roles(team_evaluations):
     split_roles = []
     max_team_size = max(
@@ -709,6 +1029,8 @@ def find_split_keep_together_roles(team_evaluations):
     return split_roles
 
 
+# 후보 팀 결과를 코드로 검증해 balance_result와 team_evaluations를 만든다.
+# 이름 중복/누락, 팀 수, 인원, 점수, 역할, 성향 리스크를 검사한다.
 def validation_balance_team(candidate_result, analyzed_students, base_teams=None):
     # 알고리즘으로 팀 검증하여 수정할 필요가 있는지 없는지 판단한다.
     # 여기서는 LLM을 쓰지 않고, 이름/중복/누락/점수/인원/역할 분포를 코드로 검사한다.
@@ -829,6 +1151,13 @@ def validation_balance_team(candidate_result, analyzed_students, base_teams=None
             f"{split_keep_together_roles}"
         )
 
+    unmet_preference_pairs = find_unmet_preference_pairs(candidate_teams, analyzed_students)
+    if unmet_preference_pairs:
+        errors.append(
+            "선호 팀원이 같은 팀에 배치되지 않았습니다. "
+            f"조정 노드에서 역할/점수/성향 균형을 해치지 않는 범위로 우선 반영하세요: {unmet_preference_pairs}"
+        )
+
     team_scores = [
         evaluation["total_score"]
         for evaluation in team_evaluations
@@ -855,6 +1184,7 @@ def validation_balance_team(candidate_result, analyzed_students, base_teams=None
         "missing_names": missing_names,
         "duplicate_names": duplicate_names,
         "unknown_names": unknown_names,
+        "unmet_preference_pairs": unmet_preference_pairs,
         "team_count": len(candidate_teams),
         "member_counts": member_counts,
         "score_gap": score_gap,
@@ -866,6 +1196,8 @@ def validation_balance_team(candidate_result, analyzed_students, base_teams=None
     return balance_result, team_evaluations
 
 
+# 보정된 팀 멤버 목록에서 role_groups 리스트를 다시 계산한다.
+# 멤버 dict 목록을 받아 [{"role_group": ..., "count": ...}] 형태로 반환한다.
 def build_repaired_role_groups(members: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     role_counts: Dict[str, int] = {}
     for member in members:
@@ -878,6 +1210,8 @@ def build_repaired_role_groups(members: List[Dict[str, Any]]) -> List[Dict[str, 
     ]
 
 
+# 알고리즘 초안에서 학생 이름별 원래 팀 index를 기록한다.
+# 누락 학생을 복구할 때 가능하면 원래 팀으로 되돌리기 위해 사용한다.
 def build_base_team_index(base_teams: List[Dict[str, Any]]) -> Dict[str, int]:
     base_team_index = {}
     for index, team in enumerate(get_candidate_teams(base_teams)):
@@ -887,6 +1221,8 @@ def build_base_team_index(base_teams: List[Dict[str, Any]]) -> Dict[str, int]:
     return base_team_index
 
 
+# 누락 학생을 복구할 대상 팀 index를 선택한다.
+# 원래 팀이 가능하면 우선하고, 아니면 인원/역할중복/총점이 낮은 팀을 고른다.
 def choose_repair_team_index(
     repaired_teams: List[Dict[str, Any]],
     student: Dict[str, Any],
@@ -906,6 +1242,8 @@ def choose_repair_team_index(
         if len(team["members"]) < 5
     ] or list(range(len(repaired_teams)))
 
+    # 보정 후보 팀의 우선순위를 계산한다.
+    # 인원이 적고 같은 역할군이 적으며 총점이 낮은 팀일수록 먼저 선택된다.
     def sort_key(index: int):
         team = repaired_teams[index]
         role_count = sum(
@@ -922,6 +1260,8 @@ def choose_repair_team_index(
     return min(available_indexes, key=sort_key)
 
 
+# 보정된 멤버 이름 목록으로 최종 팀 dict를 다시 만든다.
+# 총점, 역할 분포, 팀장, 빈 reason 필드를 코드 기준으로 재계산한다.
 def rebuild_repaired_team(team_name: str, member_names: List[str], student_lookup: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     members = [
         student_lookup[name]
@@ -940,6 +1280,8 @@ def rebuild_repaired_team(team_name: str, member_names: List[str], student_looku
     }
 
 
+# LLM 매칭 결과의 중복/누락/없는 이름을 코드로 보정한다.
+# matching_result, 학생 분석, 기준 팀을 입력받아 안전한 final_teams와 repair_report를 반환한다.
 def repair_team_matching_result(
     matching_result: Dict[str, Any],
     analyzed_students: List[Dict[str, Any]],
@@ -1023,6 +1365,8 @@ def repair_team_matching_result(
     }
 
 
+# LangGraph에서 후보 팀의 균형 검증을 담당하는 노드다.
+# 코드 검증을 우선하고, 구조 오류가 있을 때만 LLM 검증 결과를 참고로 합친다.
 def evaluate_balance_node(state: MatchingState) -> Dict[str, Any]:
     # llm_result가 있으면 LLM 제안안을 검증하고, 없으면 알고리즘 teams를 검증한다.
     # 1. 알고리즘 검증을 먼저 돌린다.
@@ -1064,6 +1408,8 @@ def evaluate_balance_node(state: MatchingState) -> Dict[str, Any]:
 
 #llm 검증로직
 #팀 하나에 대한 평가
+# LLM이 팀 하나의 정성 평가를 반환할 때 쓰는 schema다.
+# 팀별 균형 여부, 이유, 강점, 리스크, 조정 제안을 검증한다.
 class LLMBalanceTeamEvaluation(BaseModel):
     team_name: str = Field(description = "평가 대상 팀 이름") #팀이름
     is_balanced: bool = Field(description = "해당 팀이 역할, 실력, 협업 리스크 측면에서 균형적인지 여부") #팀 균형
@@ -1078,6 +1424,8 @@ class LLMBalanceTeamEvaluation(BaseModel):
     adjustment_suggestion: str = Field(description = "조정이 필요할 경우 구체적인 수정 제안") #조정 제안
 
 #전체적인 팀 매칭 결과에 대한 평가
+# LLM이 전체 팀 매칭 검증 결과를 반환할 때 쓰는 schema다.
+# 전체 균형 여부, 조정 필요성, 요청사항, 팀별 평가 목록을 담는다.
 class LLMBalanceResult(BaseModel):
     is_balanced: bool = Field(description = "전체 팀 매칭 결과가 균형적인지 여부") #전체적인 벨런스
     need_adjustment: bool = Field(description = "전체 팀 매칭 결과에 수정이 필요한지 여부") #수정이 필요한지 bool
@@ -1085,6 +1433,8 @@ class LLMBalanceResult(BaseModel):
     adjustment_request: str = Field(description = "수정이 필요할 경우 adjust_team_node에 전달할 구체적인 수정 요청") #수정 요청 수정이 필요하면 어떻게 수정할지
     team_evaluations: List[LLMBalanceTeamEvaluation] = Field(description = "팀별 균형 평가 결과") #각 팀 평가
 #이거 strutured output으로 쓰는데 description이 안적혀있음
+# 후보 팀 결과를 LLM이 정성 검증하도록 하는 프롬프트 chain을 만든다.
+# candidate_result, student_analysis, algorithm_result를 입력 변수로 사용한다.
 def get_llm_balance_prompt_chain():
     system_prompt = """
     당신은 캡스톤 프로젝트 팀 매칭 결과를 검증하는 평가자다.
@@ -1110,6 +1460,8 @@ def get_llm_balance_prompt_chain():
 
 
 #llm으로 검증
+# 후보 팀 결과를 LLM으로 정성 평가한다.
+# 후보 팀, 학생 분석, 코드 검증 결과를 입력받아 LLMBalanceResult dict를 반환한다.
 def llm_validation_balance_team(candidate_result, analyzed_students, algorithm_result):
     llm = get_llm()
     structured_llm = llm.with_structured_output(LLMBalanceResult) #스키마 넣어줘서 structured_llm 만들어줌
@@ -1125,6 +1477,8 @@ def llm_validation_balance_team(candidate_result, analyzed_students, algorithm_r
 #model_dump : basemodel 객에 dict으로 반환
 
 
+# 코드 검증 결과와 LLM 검증 결과를 하나의 balance_result로 합친다.
+# 실제 조정 여부는 코드 검증의 구조 오류를 기준으로 결정하고 LLM 의견은 warning으로 남긴다.
 def merge_balance_results(algorithm_result, llm_result):
     # 알고리즘 검증 + LLM 검증 결과를 하나의 balance_result로 합친다.
     # 코드 검증은 중복/누락/없는 이름 같은 구조 오류만 하드 게이트로 사용한다.
@@ -1149,12 +1503,31 @@ def merge_balance_results(algorithm_result, llm_result):
         "llm_result": llm_result,
         "errors": algorithm_result.get("errors", []),
         "warnings": warnings,
+        "missing_names": algorithm_result.get("missing_names", []),
+        "duplicate_names": algorithm_result.get("duplicate_names", []),
+        "unknown_names": algorithm_result.get("unknown_names", []),
+        "unmet_preference_pairs": algorithm_result.get("unmet_preference_pairs", []),
         "adjustment_request": llm_result.get("adjustment_request", ""),
     }
 
 
 MAX_ITERATION = 3
 
+# 최종 fallback이 필요한 치명적 배정 오류인지 확인한다.
+# 선호팀원 미반영은 제외하고 누락/중복/없는 이름만 True로 본다.
+def has_structural_assignment_error(balance_result: Dict[str, Any]) -> bool:
+    algorithm_result = balance_result.get("algorithm_result", {})
+    return bool(
+        balance_result.get("missing_names")
+        or balance_result.get("duplicate_names")
+        or balance_result.get("unknown_names")
+        or algorithm_result.get("missing_names")
+        or algorithm_result.get("duplicate_names")
+        or algorithm_result.get("unknown_names")
+    )
+
+# LangGraph 조건 분기에서 다음 노드를 결정한다.
+# balance_result와 iteration_count를 보고 finalize_node 또는 adjust_team_node 문자열을 반환한다.
 def should_adjust(state: MatchingState):
     # LangGraph 조건 분기 함수.
     # 코드 검증에서 치명 오류가 없으면 finalize_node, 있으면 adjust_team_node로 보낸다.
@@ -1182,6 +1555,8 @@ def should_adjust(state: MatchingState):
 #검증할때 실패하면 다시 알고리즘 보고 할수있도록 알고리즘은 그대로 두고 llm_result만 계속 덮어 씌어지면서 수정
 #수정 노드 작성할때 수정한 횟수 만큼 iteration_count올려야함 
 # TeamMatchingResult, FinalTeam, get_llm()은 위에서 정의한 것을 재사용한다.
+# 검증 실패한 팀 후보를 LLM이 다시 조정하도록 하는 프롬프트 chain을 만든다.
+# 현재 후보, 알고리즘 초안, 검증 결과, 조정 이력을 입력 변수로 사용한다.
 def get_adjust_team_prompt_chain():
     system_prompt = """
     당신은 캡스톤 프로젝트 팀 매칭 결과를 수정하는 담당자다.
@@ -1263,6 +1638,8 @@ def get_adjust_team_prompt_chain():
     ])
 # class MatchingState
 #iteration_count 3으로할지 4로할지.
+# LangGraph에서 검증 실패한 팀 후보를 LLM으로 재조정하는 노드다.
+# state를 입력받아 새 llm_result, 증가한 iteration_count, adjustment_history를 반환한다.
 def adjust_team_node(state: MatchingState) -> Dict[str, Any]:
     # balance_result를 보고 LLM이 팀 후보를 다시 수정한다.
     # 수정된 결과는 final_result가 아니라 llm_result에 덮어쓴다.
@@ -1316,6 +1693,8 @@ def adjust_team_node(state: MatchingState) -> Dict[str, Any]:
     }
 
 
+# 배정 이유에서 실제 팀장과 다른 학생을 팀장/리더로 언급한 문장을 제거한다.
+# reason, 확정 leader_name, 팀원 이름 목록을 받아 정리된 reason 문자열을 반환한다.
 def remove_conflicting_leader_sentences(reason: str, leader_name: str, member_names: List[str]) -> str:
     if not reason:
         return ""
@@ -1343,6 +1722,8 @@ def remove_conflicting_leader_sentences(reason: str, leader_name: str, member_na
     return " ".join(filtered_sentences)
 
 
+# 이유 문자열에서 [강점], [약점], [리스크] 같은 후속 섹션을 잘라낸다.
+# 최종 화면에 보여줄 핵심 reason 문장만 반환한다.
 def clean_reason_sections(reason: str) -> str:
     if not reason:
         return ""
@@ -1350,6 +1731,8 @@ def clean_reason_sections(reason: str) -> str:
     return re.split(r"\s*\[(?:강점|보완점|약점|리스크)\]", reason, maxsplit=1)[0].strip()
 
 
+# 최종 팀 이유 문구가 확정 팀장과 충돌하지 않게 정리한다.
+# 팀 dict, 팀장 이름, 멤버 분석 목록을 입력받아 reason이 정리된 팀 dict를 반환한다.
 def align_reason_with_leader(team: Dict[str, Any], leader_name: str, members: List[Dict[str, Any]]) -> Dict[str, Any]:
     member_names = [member.get("name") for member in members if member.get("name")]
     original_reason = team.get("reason", "")
@@ -1366,6 +1749,8 @@ def align_reason_with_leader(team: Dict[str, Any], leader_name: str, members: Li
     }
 
 
+# 최종 팀 목록에 팀장 근거, 성향 평균, 리스크, 선호 메모를 보강한다.
+# final_teams와 분석 학생 목록을 받아 화면/저장용 enriched team 목록 또는 dict를 반환한다.
 def enrich_final_teams(final_teams, analyzed_students):
     student_lookup = build_student_lookup(analyzed_students)
     enriched_teams = []
@@ -1386,6 +1771,10 @@ def enrich_final_teams(final_teams, analyzed_students):
         enriched_team["development_averages"] = calculate_trait_averages(members, "development_scores")
         enriched_team["trait_risks"] = build_team_trait_risks(members)
         enriched_team["preference_notes"] = team_preference_notes(members)
+        enriched_team["matching_evidence"] = build_team_matching_evidence({
+            **enriched_team,
+            "members": members,
+        })
         enriched_teams.append(enriched_team)
 
     if isinstance(final_teams, dict):
@@ -1396,6 +1785,8 @@ def enrich_final_teams(final_teams, analyzed_students):
     return enriched_teams
 
 
+# 팀원들의 stack_score에서 중복 없는 대표 기술명을 모은다.
+# 이유 생성 context에 넣을 기술 스택을 limit개까지 반환한다.
 def collect_representative_stacks_for_reason(members: List[Dict[str, Any]], limit: int = 3) -> List[str]:
     stacks = []
     seen = set()
@@ -1411,6 +1802,8 @@ def collect_representative_stacks_for_reason(members: List[Dict[str, Any]], limi
     return stacks
 
 
+# 이유 생성용 긴 텍스트를 한 줄로 정리하고 limit 길이로 줄인다.
+# 리스트는 문자열로 합치고 None은 빈 문자열로 반환한다.
 def compact_reason_text(value: Any, limit: int = 90) -> str:
     if isinstance(value, list):
         value = " ".join(str(item) for item in value if item)
@@ -1424,6 +1817,237 @@ def compact_reason_text(value: Any, limit: int = 90) -> str:
     return text[:limit].rstrip() + "..."
 
 
+# 팀 내 역할 분포가 어떤 배정 근거가 되는지 짧게 정리한다.
+# 최종 reason LLM이 기술 나열 대신 실제 팀 구성 기준을 설명하도록 전달한다.
+def build_role_balance_evidence(role_counts: Dict[str, int]) -> List[str]:
+    evidence = []
+    required_roles = ["backend", "frontend", "ai_data", "design", "app"]
+    present_roles = [role for role in required_roles if role_counts.get(role)]
+    missing_roles = [role for role in required_roles if not role_counts.get(role)]
+
+    if len(present_roles) >= 4:
+        evidence.append("핵심 구현 역할이 한쪽에 몰리지 않도록 역할군을 분산했습니다.")
+    if missing_roles:
+        evidence.append(
+            "부족한 역할군은 "
+            + ", ".join(get_reason_role_label(role) for role in missing_roles)
+            + "입니다."
+        )
+
+    repeated_roles = [
+        get_reason_role_label(role_group)
+        for role_group, count in role_counts.items()
+        if count > 1
+    ]
+    if repeated_roles:
+        evidence.append(
+            ", ".join(repeated_roles)
+            + " 역할이 겹치므로 작업 범위를 초반에 나누는 것이 좋습니다."
+        )
+
+    return evidence
+
+
+# 팀 안에서 실제로 반영된 선호 팀원 관계와 미반영 선호를 분리해 반환한다.
+# reason 생성 시 "왜 같이 배치했는지"와 "왜 못 맞췄는지"를 근거로 사용한다.
+def build_preference_evidence(members: List[Dict[str, Any]]) -> Dict[str, List[str]]:
+    member_names = {member.get("name") for member in members}
+    matched = []
+    unmatched = []
+
+    for member in members:
+        member_name = member.get("name")
+        for preferred_name in get_preferred_members(member):
+            if preferred_name in member_names:
+                matched.append(f"선호 반영: {member_name} -> {preferred_name}")
+            else:
+                unmatched.append(f"선호 미반영: {member_name} -> {preferred_name}")
+
+    return {
+        "matched": matched[:6],
+        "unmatched": unmatched[:4],
+    }
+
+
+# 팀장 선정이 팀장 희망을 반영했는지 정리한다.
+# wants_leader 학생이 있으면 그 사실을 reason LLM에 명시적으로 넘긴다.
+def build_leader_selection_evidence(leader_name: str, members: List[Dict[str, Any]]) -> Dict[str, Any]:
+    leader_candidates = [
+        member.get("name")
+        for member in members
+        if member.get("wants_leader")
+    ]
+    if leader_name and leader_name in leader_candidates:
+        return {
+            "leader": leader_name,
+            "reason": "wants_leader",
+            "candidate_names": leader_candidates,
+        }
+    if leader_candidates:
+        return {
+            "leader": leader_name,
+            "reason": "balanced_leader_choice",
+            "candidate_names": leader_candidates,
+        }
+    if leader_name:
+        return {
+            "leader": leader_name,
+            "reason": "leader_score",
+            "candidate_names": [],
+        }
+    return {}
+
+
+# 팀 내 대표 학생 2~3명의 핵심 배치 근거를 만든다.
+# 선호 반영, 팀장 희망, 역할 보완 순서로 중요한 근거만 골라 reason LLM에 전달한다.
+def build_key_placements(
+    members: List[Dict[str, Any]],
+    role_counts: Dict[str, int],
+    preference_evidence: Dict[str, List[str]],
+    leader_evidence: Dict[str, Any],
+) -> List[Dict[str, str]]:
+    member_names = {member.get("name") for member in members}
+    placements = []
+    seen = set()
+
+    def add_placement(student_name: str, reason_type: str, reason: str):
+        if not student_name or student_name in seen or student_name not in member_names:
+            return
+        seen.add(student_name)
+        placements.append({
+            "student": student_name,
+            "reason_type": reason_type,
+            "reason": reason,
+        })
+
+    for matched in preference_evidence.get("matched", []):
+        match = re.match(r"선호 반영:\s*(.+?)\s*->\s*(.+)", matched)
+        if not match:
+            continue
+        student_name, preferred_name = match.group(1), match.group(2)
+        add_placement(
+            student_name,
+            "preference",
+            f"{preferred_name} 선호가 반영되어 초반 역할 조율 비용을 줄일 수 있습니다.",
+        )
+        if len(placements) >= 3:
+            return placements
+
+    if leader_evidence.get("reason") == "wants_leader":
+        leader_name = leader_evidence.get("leader")
+        add_placement(
+            leader_name,
+            "leader_preference",
+            "팀장 희망이 반영되어 일정 정리와 의사결정 중심 역할을 맡기 좋습니다.",
+        )
+
+    single_role_members = [
+        member
+        for member in members
+        if role_counts.get(member.get("role_group"), 0) == 1
+    ]
+    for member in single_role_members:
+        add_placement(
+            member.get("name"),
+            "role_balance",
+            f"{get_reason_role_label(member.get('role_group'))} 역할을 맡아 팀의 구현 범위를 보완합니다.",
+        )
+        if len(placements) >= 3:
+            break
+
+    return placements[:3]
+
+
+# 팀원 역할 조합에서 실제 구현 흐름으로 이어질 수 있는 연결 근거를 만든다.
+# 기술명 나열 대신 역할 간 산출물 흐름을 설명할 수 있게 reason LLM에 전달한다.
+def build_implementation_connections(members: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    role_members: Dict[str, List[Dict[str, Any]]] = {}
+    for member in members:
+        role_group = member.get("role_group") or get_role_group(member.get("role"))
+        role_members.setdefault(role_group, []).append(member)
+
+    connection_specs = [
+        ("backend", "frontend", "API와 화면 연동 흐름을 함께 맞출 수 있습니다."),
+        ("backend", "app", "서버 기능을 앱 화면과 안정적으로 연결할 수 있습니다."),
+        ("ai_data", "backend", "분석 결과를 API와 저장 구조로 연결하기 좋습니다."),
+        ("ai_data", "frontend", "분석 결과를 사용자가 이해할 수 있는 화면으로 풀어낼 수 있습니다."),
+        ("design", "frontend", "사용자 흐름과 웹 화면 구현을 함께 다듬기 좋습니다."),
+        ("design", "app", "모바일 사용 흐름과 앱 화면 구현을 함께 맞추기 좋습니다."),
+    ]
+    connections = []
+
+    for source_role, target_role, reason in connection_specs:
+        source = role_members.get(source_role, [None])[0]
+        target = role_members.get(target_role, [None])[0]
+        if not source or not target:
+            continue
+        connections.append({
+            "source": source.get("name"),
+            "source_role": get_reason_role_label(source_role),
+            "target": target.get("name"),
+            "target_role": get_reason_role_label(target_role),
+            "reason": reason,
+        })
+        if len(connections) >= 4:
+            break
+
+    return connections
+
+
+# 최종 팀 멤버 기준으로 reason 생성에 사용할 실제 매칭 근거를 구조화한다.
+# 선호, 팀장, 구현 연결, 리스크처럼 사용자가 납득할 수 있는 관찰 근거만 저장한다.
+def build_team_matching_evidence(team: Dict[str, Any]) -> Dict[str, Any]:
+    members = [
+        member
+        for member in team.get("members", [])
+        if isinstance(member, dict)
+    ]
+    role_counts: Dict[str, int] = {}
+    for member in members:
+        role_group = member.get("role_group") or get_role_group(member.get("role"))
+        role_counts[role_group] = role_counts.get(role_group, 0) + 1
+
+    leader_name = team.get("leader") or choose_preference_aware_leader(members).get("name", "")
+    preference_evidence = build_preference_evidence(members)
+    leader_evidence = build_leader_selection_evidence(leader_name, members)
+    key_placements = build_key_placements(
+        members,
+        role_counts,
+        preference_evidence,
+        leader_evidence,
+    )
+
+    return {
+        "role_distribution": [
+            {"role": get_reason_role_label(role_group), "count": count}
+            for role_group, count in role_counts.items()
+        ],
+        "preference": {
+            **preference_evidence,
+            "matched_count": len(preference_evidence.get("matched", [])),
+            "unmatched_count": len(preference_evidence.get("unmatched", [])),
+        },
+        "leader_selection": leader_evidence,
+        "key_placements": key_placements,
+        "implementation_connections": build_implementation_connections(members),
+        "risks": team.get("trait_risks", [])[:4] or build_team_trait_risks(members)[:4],
+        "team_notes": team.get("preference_notes", [])[:6] or team_preference_notes(members)[:6],
+        "leader_reason": team.get("leader_reason", ""),
+    }
+
+
+# reason LLM에 넘길 matching_evidence에서 내부 계산/알고리즘 산출물을 제외한다.
+# 최종 문장은 선호, 팀장 희망, 구현 연결, 위험 요소 같은 설명 가능한 근거만 보게 한다.
+def build_public_matching_evidence(matching_evidence: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        key: value
+        for key, value in (matching_evidence or {}).items()
+        if key not in {"score_summary", "role_balance"}
+    }
+
+
+# 최종 이유 카드 LLM에 넣을 팀별 context를 만든다.
+# 팀별 멤버, 리더, 프로필 요약, 공개 가능한 매칭 근거만 반환한다.
 def build_reason_card_context(final_teams, analyzed_students):
     student_lookup = build_student_lookup(analyzed_students)
     contexts = []
@@ -1439,6 +2063,11 @@ def build_reason_card_context(final_teams, analyzed_students):
         for member in members:
             role_group = member.get("role_group") or get_role_group(member.get("role"))
             role_counts[role_group] = role_counts.get(role_group, 0) + 1
+        matching_evidence = team.get("matching_evidence") or build_team_matching_evidence({
+            **team,
+            "members": members,
+        })
+        public_matching_evidence = build_public_matching_evidence(matching_evidence)
 
         contexts.append({
             "team_name": team.get("team_name"),
@@ -1456,11 +2085,11 @@ def build_reason_card_context(final_teams, analyzed_students):
                 }
                 for member in members
             ],
+            "matching_evidence": public_matching_evidence,
             "role_distribution": [
                 {"role": get_reason_role_label(role_group), "count": count}
                 for role_group, count in role_counts.items()
             ],
-            "representative_stacks": collect_representative_stacks_for_reason(members, limit=3),
             "trait_complements": [
                 {"trait": complement.get("label")}
                 for complement in build_trait_complements(members)[:3]
@@ -1471,6 +2100,8 @@ def build_reason_card_context(final_teams, analyzed_students):
     return contexts
 
 
+# 최종 팀 목록에서 reason_cards와 reason을 빈 값으로 초기화한다.
+# 이유 생성 LLM 실패 시 fallback으로 카드 없이 반환하기 위해 사용한다.
 def clear_final_team_reasons(final_teams):
     fixed_teams = []
     for team in get_candidate_teams(final_teams):
@@ -1482,6 +2113,8 @@ def clear_final_team_reasons(final_teams):
     return fixed_teams
 
 
+# LLM이 만든 reason_cards를 title/description만 남겨 정리한다.
+# 잘못된 카드 형식은 건너뛰고 최소 2개, 최대 3개 카드까지 반환한다.
 def sanitize_llm_reason_cards(cards: Any) -> List[Dict[str, str]]:
     if not isinstance(cards, list):
         return []
@@ -1501,56 +2134,185 @@ def sanitize_llm_reason_cards(cards: Any) -> List[Dict[str, str]]:
             "description": description,
         })
 
-    return sanitized_cards[:2]
+    return sanitized_cards[:3]
 
 
+# 최종 이유 카드 LLM이 팀 하나에 대해 반환해야 하는 schema다.
+# 팀 이름, reason_cards, 호환용 reason 문자열을 검증한다.
 class FinalTeamReasonCards(BaseModel):
     team_name: str = Field(description="reason_cards를 생성할 팀 이름")
-    reason_cards: List[ReasonCard] = Field(description="팀 특징에 맞게 선택한 배정 이유 카드 정확히 2개")
-    reason: str = Field(description="reason_cards 두 개의 description을 공백으로 이어 붙인 호환용 요약 설명")
+    reason_cards: List[ReasonCard] = Field(description="팀에서 가장 설득력 있는 배정 이유 카드 최소 2개, 최대 3개")
+    reason: str = Field(description="reason_cards의 description들을 공백으로 이어 붙인 호환용 요약 설명")
 
 
+# 최종 이유 카드 LLM의 전체 응답 schema다.
+# 팀별 FinalTeamReasonCards 목록을 teams 필드에 담는다.
 class FinalReasonCardsResult(BaseModel):
     teams: List[FinalTeamReasonCards] = Field(description="최종 확정 팀별 배정 이유 카드 목록")
 
 
+# 최종 팀 강점/약점 LLM이 팀 하나에 대해 반환해야 하는 schema다.
+# 팀 이름과 관리자 화면에 보여줄 strengths, weaknesses 문장을 검증한다.
+class FinalTeamAnalysis(BaseModel):
+    team_name: str = Field(description="강점/약점을 생성할 팀 이름")
+    strengths: str = Field(description="팀원 조합으로 만들 수 있는 시너지를 설명하는 강점 문장")
+    weaknesses: str = Field(description="팀 구성상 생길 수 있는 리스크와 보완 방식을 설명하는 약점 문장")
+
+
+# 최종 팀 강점/약점 LLM의 전체 응답 schema다.
+# 팀별 FinalTeamAnalysis 목록을 teams 필드에 담는다.
+class FinalTeamAnalysisResult(BaseModel):
+    teams: List[FinalTeamAnalysis] = Field(description="최종 확정 팀별 강점/약점 목록")
+
+
+# 최종 확정 팀의 강점/약점을 예시 톤으로 생성하는 프롬프트 chain을 만든다.
+# 팀원 변경 없이 member_profiles 근거를 사용해 시너지와 보완점을 쓰게 한다.
+def get_final_team_analysis_prompt_chain():
+    system_prompt = """
+    당신은 캡스톤 팀 추천 결과를 관리자에게 설명하는 담당자다.
+    팀원 배정은 이미 끝났으므로 팀원, 팀 수, 팀 이름, 팀장, 역할 분포를 절대 바꾸지 않는다.
+    목표는 최종 팀만 보고 그럴듯한 문장을 만드는 것이 아니라, matching_evidence에 있는 실제 배치 근거를 바탕으로 설명하는 것이다.
+    matching_evidence에는 알고리즘 초안, 점수 합계, 검증 결과가 들어 있지 않으므로 임의로 추측하지 않는다.
+
+    출력 규칙:
+    - 반드시 지정된 structured output schema에 맞춰 출력한다.
+    - teams의 각 항목은 team_name, strengths, weaknesses만 포함한다.
+    - strengths는 2문장으로 작성한다.
+    - weaknesses는 2문장으로 작성한다.
+    - 모든 문장은 관리자 화면에 그대로 노출된다. 반드시 존댓말로 작성하고, 문장 끝은 "-습니다", "-입니다", "-됩니다", "-합니다" 중 하나로 끝낸다.
+    - 숫자 점수는 쓰지 말고 "구현 경험이 충분한 편", "소통이 안정적인 편"처럼 자연어로 표현한다.
+    - strengths 첫 문장은 matching_evidence의 preference, leader_selection, key_placements 중 하나를 반드시 반영한다.
+    - strengths 둘째 문장은 "A의 어떤 능력과 B의 어떤 능력이 만나 어떤 결과를 만들 수 있는지"를 구체적으로 쓴다.
+    - weaknesses는 부족한 역할이나 병목 가능성을 말한 뒤, 어떤 방식으로 보완하면 좋은지까지 쓴다.
+    - 학생 이름은 현재 팀원 중 필요한 1~2명만 언급한다. 모든 학생을 나열하지 않는다.
+    - 기술 스택은 꼭 필요할 때만 1~2개 사용한다.
+    - "역할이 고르게 배치되어", "협업 성향이 안정적인 팀", "시너지 극대화", "동시에 만족", "알고리즘", "점수 기준" 같은 일반적이거나 기계적인 표현은 쓰지 않는다.
+    - matching_evidence에 없는 소통/협업 안정성은 새로 만들어 쓰지 않는다.
+    - 현재 팀원이 아닌 학생 이름은 절대 언급하지 않는다.
+
+    좋은 strengths 예시:
+    - "김민수와 이서연은 서로 선호한 관계가 반영되어 초반 역할 조율을 빠르게 시작하기 좋은 조합입니다. 김민수의 API 구현 경험과 이서연의 화면 구성 능력이 만나 기능 흐름을 사용자 화면까지 자연스럽게 이어갈 수 있습니다."
+    - "팀장 희망을 표시한 박지훈을 중심으로 AI 실험 결과를 정리하고, 최유진의 앱 구현 역량으로 결과 확인 화면까지 연결하기 좋은 팀입니다. 모델 결과를 사용자가 확인하는 흐름까지 만들 수 있어 추천 기능을 서비스 형태로 보여주기 쉽습니다."
+
+    좋은 weaknesses 예시:
+    - "백엔드 구현을 맡을 학생이 적어 API 설계와 데이터 저장 흐름이 한쪽에 몰릴 수 있습니다. 초반에는 인증이나 부가 기능보다 핵심 API 명세를 먼저 정리해 프론트엔드 연동 지연을 줄이는 방식이 필요합니다."
+    - "화면 구현 경험이 상대적으로 부족해 결과를 사용자가 이해하기 쉬운 UI로 풀어내는 데 시간이 걸릴 수 있습니다. 따라서 복잡한 화면보다 결과 확인 중심의 단순한 흐름부터 구현하는 것이 안정적입니다."
+    """
+
+    user_prompt = """
+    final_teams:
+    {final_teams}
+
+    reason_context:
+    {reason_context}
+
+    요청:
+    위 최종 팀 구성은 확정된 결과다. 팀원을 바꾸지 말고 각 팀의 strengths와 weaknesses만 작성해라.
+    """
+
+    return ChatPromptTemplate.from_messages([
+        ("system", system_prompt),
+        ("human", user_prompt),
+    ])
+
+
+# LLM이 만든 강점/약점 문장을 화면 노출용으로 정리한다.
+# 값이 비어 있으면 알고리즘 문장으로 대체하지 않고 빈 문자열을 반환한다.
+def sanitize_team_analysis_text(value: Any) -> str:
+    text = clean_reason_sections(str(value or "").strip())
+    return text
+
+
+# 최종 팀 목록에 대해 LLM으로 강점/약점 문장을 생성한다.
+# 실패하거나 누락된 팀은 알고리즘 fallback 없이 strengths/weaknesses를 비워 둔다.
+def generate_final_team_analysis(final_teams, analyzed_students):
+    try:
+        reason_context = build_reason_card_context(final_teams, analyzed_students)
+        llm = get_llm()
+        structured_llm = llm.with_structured_output(FinalTeamAnalysisResult)
+        chain = get_final_team_analysis_prompt_chain() | structured_llm
+        response = chain.invoke({
+            "final_teams": json.dumps(reason_context, ensure_ascii=False, indent=2),
+            "reason_context": json.dumps(reason_context, ensure_ascii=False, indent=2),
+        })
+        result = response.model_dump() if hasattr(response, "model_dump") else response
+    except Exception:
+        return [
+            {
+                **team,
+                "strengths": "",
+                "weaknesses": "",
+            }
+            for team in get_candidate_teams(final_teams)
+        ]
+
+    analysis_by_team = {
+        team.get("team_name"): team
+        for team in result.get("teams", [])
+        if isinstance(team, dict)
+    }
+    fixed_teams = []
+    for team in get_candidate_teams(final_teams):
+        fixed_team = dict(team)
+        generated = analysis_by_team.get(fixed_team.get("team_name"), {})
+        fixed_team["strengths"] = sanitize_team_analysis_text(generated.get("strengths"))
+        fixed_team["weaknesses"] = sanitize_team_analysis_text(generated.get("weaknesses"))
+        fixed_teams.append(fixed_team)
+
+    return fixed_teams
+
+
+# 최종 확정 팀의 관리자 노출용 reason_cards 생성 프롬프트를 만든다.
+# final_teams와 reason_context를 입력받아 팀원 변경 없이 이유 카드만 생성하게 한다.
 def get_final_reason_cards_prompt_chain():
     system_prompt = """
     당신은 최종 확정된 캡스톤 팀 구성에 대해 관리자 화면에 보여줄 배정 이유 카드를 작성한다.
     팀원 배정은 이미 끝났으므로 팀원, 팀 수, 팀 이름, 팀장, 역할 분포를 절대 바꾸지 않는다.
     이 작업은 규칙 기반 fallback 문구를 대체하기 위한 최종 사용자 노출 문구 작성이다.
     절대 알고리즘 설명처럼 쓰지 말고, 실제 관리자가 납득할 수 있는 자연스러운 존댓말 문장으로 작성한다.
-    핵심은 member_profiles의 strength, suggestion, experience 중 의미 있는 근거만 골라
-    "어떤 학생의 어떤 능력과 다른 학생의 어떤 능력이 만나 앞으로 어떤 결과를 만들 수 있어 매칭했는지"를 짧게 설명하는 것이다.
+    핵심은 matching_evidence와 member_profiles를 비교해 이 팀에서 가장 설득력 있는 배정 이유를 최소 2개, 필요하면 3개까지 고르는 것이다.
+    matching_evidence에는 알고리즘 초안, 점수 합계, 검증 결과가 없으므로 그런 값을 근거로 쓰지 않는다.
+    근거가 약한 리더십/역할 균형/기술 조합 카드를 억지로 만들지 않는다.
 
     출력 규칙:
     - 반드시 지정된 structured output schema에 맞춰 출력한다.
     - teams의 각 항목은 team_name, reason_cards, reason만 포함한다.
-    - 각 팀의 reason_cards는 정확히 2개 작성한다.
-    - reason_cards의 title은 다음 예시 중 팀에 맞는 것을 고르거나 같은 톤으로 작성한다: 역할 균형이 잘 맞는 팀, 기능 구현과 화면 완성도를 함께 고려한 팀, 부담을 보완할 수 있는 팀, 협업 성향이 안정적인 팀, 프로젝트 확장 가능성이 높은 팀, 소통 점수 보완 배치, 리더십 중심의 팀 운영 가능, 개발 실력 차이 보완, 책임감 기반의 안정적인 팀 구성, 협업 성향을 고려한 역할 배치.
-    - 각 description은 제목을 반복하지 말고 90~170자 정도의 2문장으로 작성한다.
+    - 각 팀의 reason_cards는 최소 2개 작성한다.
+    - 서로 다른 강한 근거가 3개 있으면 reason_cards를 3개까지 작성할 수 있다.
+    - reason_cards의 title은 팀의 가장 강한 배정 근거를 구체적으로 드러낸다. 예: 선호 관계와 역할 균형을 함께 살린 팀, AI 결과를 서비스 기능으로 연결하기 좋은 팀, 프론트엔드와 앱 구현 부담을 나눌 수 있는 팀, 백엔드와 데이터 흐름을 안정적으로 맡길 수 있는 팀.
+    - "리더십 중심의 팀 운영 가능", "팀장 희망을 반영한 운영 중심 팀"은 팀장 희망 반영이 이 팀의 가장 중요한 이유일 때만 사용한다.
+    - 각 description은 제목을 반복하지 말고 130~220자 정도의 2~3문장으로 작성한다.
     - 모든 description 문장은 관리자 화면에 그대로 노출된다. 반드시 존댓말로 작성하고, 모든 문장 끝은 "-습니다", "-입니다", "-됩니다", "-합니다" 중 하나로 끝낸다.
     - 절대 쓰면 안 되는 종결: "한다", "된다", "높인다", "해소한다", "유지한다", "기대된다", "가능하다", "충족시킨다".
     - 절대 쓰면 안 되는 표현: "알고리즘", "규칙 기반", "fallback", "점수 기준", "균형 계산", "시너지 극대화", "동시에 만족", "품질을 높인다".
-    - suggestion은 참고 근거로만 사용하고 원문을 요약하거나 복사하지 않는다. 한 카드에는 suggestion에서 가장 중요한 판단 근거 1개만 반영한다.
-    - 각 카드 description에는 현재 팀원 중 2명의 이름을 언급하고, 두 학생의 특정 능력/성향/경험이 어떻게 맞물리는지 설명한다.
-    - "A의 백엔드 구현 능력과 B의 화면 설계 경험이 만나 데이터 흐름을 사용자 화면까지 안정적으로 이어갈 수 있어 이 팀으로 매칭했습니다"처럼 배정 의도를 드러낸다.
+    - 각 reason_card는 서로 다른 배정 근거를 담는다. 같은 말을 제목만 바꿔 반복하지 않는다.
+    - 두 카드 중 최소 1개는 matching_evidence.key_placements 또는 preference.matched를 반영한다.
+    - 최소 1개는 matching_evidence.implementation_connections를 반영해 역할 간 구현 흐름을 설명한다.
+    - preference.matched가 있으면 선호 관계를 우선 검토하되, 역할 균형이나 구현 연결이 약하면 억지로 쓰지 않는다.
+    - leader_selection은 보조 근거다. 팀장 희망이 실제 팀 운영상 핵심 장점일 때만 한 문장 이내로 언급한다.
+    - risks는 약점/주의점 근거로만 사용하고, 장점처럼 포장하지 않는다.
+    - suggestion은 참고 근거로만 사용하고 원문을 요약하거나 복사하지 않는다.
+    - 각 카드 description에는 현재 팀원 중 필요한 1~2명의 이름을 언급하고, 왜 같은 팀에 둔 판단인지 설명한다.
+    - "A가 선호한 B와 같은 팀에 배치해 초반 소통 비용을 줄이고, C가 부족한 역할을 보완하도록 구성했습니다"처럼 배정 의도를 드러낸다.
     - 학생별 경험 목록, 스택 목록, 구현 기능 목록을 나열하지 않는다. 한 학생당 대표 능력 하나만 고른다.
     - 기술 스택은 꼭 필요할 때만 카드당 1~2개 사용한다.
     - 현재 팀원이 아닌 학생 이름은 절대 언급하지 않는다.
-    - "각 구성원의 소통, 책임감, 협업, 유연성 등 성격 성향이 고르게 분포되어" 같은 일반 템플릿 문장을 쓰지 않는다.
+    - "각 구성원의 소통, 책임감, 협업, 유연성 등 성격 성향이 고르게 분포되어", "협업 성향이 안정적인 팀" 같은 일반 템플릿 문장을 쓰지 않는다.
+    - matching_evidence에 없는 협업 안정성, 소통 안정성, 책임감 안정성은 새로 만들어 쓰지 않는다.
     - 숫자 점수는 되도록 쓰지 말고 "소통이 낮은 편", "책임감이 높은 편", "구현 경험이 풍부한 편"처럼 자연어로 표현한다.
-    - reason은 reason_cards 두 개의 description을 공백으로 이어 붙여 작성한다.
+    - reason은 reason_cards의 모든 description을 공백으로 이어 붙여 작성한다.
 
     좋은 문장 예시:
-    - "김민수의 API 구현 강점과 이서연의 화면 구성 능력이 만나 기능 흐름을 사용자 화면까지 자연스럽게 이어갈 수 있습니다. 두 학생이 명세와 화면 상태를 함께 맞춰가기 좋아 이 팀으로 매칭했습니다."
-    - "박지훈의 AI 실험 경험과 최유진의 앱 구현 역량이 연결되면 분석 결과를 실제 모바일 기능으로 확장하기 좋습니다. 모델 결과를 사용자가 확인하는 흐름까지 만들 수 있어 같은 팀에 배정했습니다."
+    - "김민수가 선호한 이서연을 같은 팀에 배치해 초반 요구사항 정리와 화면 흐름 조율을 빠르게 시작할 수 있습니다. 김민수의 API 구현 강점과 이서연의 화면 구성 능력이 만나 기능 흐름을 사용자 화면까지 자연스럽게 이어갈 수 있습니다."
+    - "팀장 희망을 표시한 박지훈을 운영 중심에 두고, 최유진의 앱 구현 역량을 연결해 분석 결과를 실제 모바일 기능으로 확장하기 좋습니다. 모델 결과를 사용자가 확인하는 흐름까지 만들 수 있어 같은 팀에 배정했습니다."
     - "김성현은 핵심 기능 구현에 강점이 있고, 소통이 안정적인 팀원이 요구사항 정리와 일정 조율을 보완할 수 있습니다. 개발 속도와 협업 안정성을 함께 가져갈 수 있어 이 조합으로 매칭했습니다."
 
     나쁜 문장 예시:
     - "백엔드, 프론트엔드, 디자인, 앱, AI 역할이 고르게 배치되어 각 담당자가 맡은 범위에 집중하기 쉬운 구성입니다."
     - "Spring Boot와 Java를 활용한 백엔드 구현, Vue를 활용한 프론트엔드 화면 구성, Flutter와 Dart를 활용한 앱 개발이 자연스럽게 이어집니다."
     - "이 팀은 역할이 균형 있게 구성되어 안정적인 협업이 가능합니다."
+    - "김아린의 Redux Toolkit 역량과 신우진의 Pandas 역량이 함께하면 협업 성향이 안정적인 팀이 됩니다."
+    - "권서준이 리더십/정리 역량 기준 팀장 추천으로 리더십을 발휘하고, 민하준과 김아린이 각각 앱과 프론트엔드 핵심 역량을 제공해 역할 균형을 맞췄습니다."
     - "김도현은 Spring Boot와 Spring Security를 활용한 인증/인가 시스템 구현, JPA 연관관계 매핑, Docker Compose 개발 환경 구축 경험이 있습니다."
     """
 
@@ -1562,7 +2324,7 @@ def get_final_reason_cards_prompt_chain():
     {reason_context}
 
     요청:
-    위 최종 팀 구성은 확정된 결과다. 팀원을 바꾸지 말고 각 팀에 reason_cards 2개만 작성해라.
+    위 최종 팀 구성은 확정된 결과다. 팀원을 바꾸지 말고 각 팀에서 가장 괜찮은 매칭 이유 reason_cards를 최소 2개, 필요하면 3개까지 작성해라.
     """
 
     return ChatPromptTemplate.from_messages([
@@ -1571,6 +2333,8 @@ def get_final_reason_cards_prompt_chain():
     ])
 
 
+# 최종 팀 목록에 대해 LLM으로 배정 이유 카드를 생성한다.
+# 실패하면 reason을 비운 팀 목록을 반환하고, 성공하면 카드와 reason을 팀별로 병합한다.
 def generate_final_reason_cards(final_teams, analyzed_students):
     try:
         reason_context = build_reason_card_context(final_teams, analyzed_students)
@@ -1617,6 +2381,8 @@ def generate_final_reason_cards(final_teams, analyzed_students):
 
 #최종 설명노드
 #검증된 매칭된 팀 final_result출력
+# LangGraph 마지막 단계에서 최종 매칭 결과를 확정한다.
+# state를 입력받아 final_teams, 검증 결과, 조정 기록, 선호 거절 사유를 final_result에 담는다.
 def finalize_node(state: MatchingState) -> Dict[str, Any]:
     balance_result = state.get("balance_result", {})
     iteration_count = state.get("iteration_count", 0)
@@ -1630,13 +2396,7 @@ def finalize_node(state: MatchingState) -> Dict[str, Any]:
         finalized_by = "manual_finalize"
 
     candidate_teams = state.get("llm_result") or state.get("teams", [])
-    algorithm_errors = balance_result.get("algorithm_result", {}).get("errors", [])
-    has_assignment_error = bool(
-        algorithm_errors
-        or balance_result.get("missing_names")
-        or balance_result.get("duplicate_names")
-        or balance_result.get("unknown_names")
-    )
+    has_assignment_error = has_structural_assignment_error(balance_result)
 
     if finalized_by == "max_iteration" and has_assignment_error:
         # LLM이 반복 수정 후에도 누락/중복을 남기면 화면에는 검증 가능한 규칙 기반 팀을 보낸다.
@@ -1660,16 +2420,12 @@ def finalize_node(state: MatchingState) -> Dict[str, Any]:
     else:
         team_evaluations = state.get("team_evaluations", [])
 
-    final_teams = generate_final_reason_cards(
-        enrich_final_teams(candidate_teams, analyzed_students),
-        analyzed_students,
-    )
+    enriched_teams = enrich_final_teams(candidate_teams, analyzed_students)
+    analyzed_teams = generate_final_team_analysis(enriched_teams, analyzed_students)
+    final_teams = generate_final_reason_cards(analyzed_teams, analyzed_students)
 
     final_result = {
         "final_teams": final_teams,
-        "algorithm_teams": state.get("teams", []),
-        "balance_result": balance_result,
-        "team_evaluations": team_evaluations,
         "adjustment_history": state.get("adjustment_history", []),
         "preference_rejections": build_preference_rejections(
             get_candidate_teams(final_teams),
@@ -1723,13 +2479,25 @@ workflow.add_edge('finalize_node',END)
 app = workflow.compile()
 
 
+# 워크플로우 전체 결과를 MySQL과 matching_output.json에 저장한다.
+# result dict에서 공개 결과만 추려 DB 저장 후 로컬 파일에도 JSON으로 기록한다.
+def build_public_workflow_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "analyzed_students": result.get("analyzed_students", []),
+        "final_result": result.get("final_result", {}),
+    }
+
+
 def save_workflow_result(result):
-    save_matching_result(result)
+    public_result = build_public_workflow_result(result)
+    save_matching_result(public_result)
     output_path = Path(__file__).resolve().parents[1] / "data/student_analysis_data/matching_output.json"
     with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False, indent=2)
+        json.dump(public_result, f, ensure_ascii=False, indent=2)
 
 
+# force_rematch 설정을 보고 기존 매칭 결과 캐시를 읽을지 결정한다.
+# 재매칭이 강제되지 않으면 MySQL의 최신 매칭 결과를 반환한다.
 def load_cached_matching_result(force_rematch=False):
     # 이미 MySQL에 매칭 결과가 있으면 기존 결과를 재사용한다.
     # FORCE_REMATCH=true 환경변수를 주면 기존 결과가 있어도 새로 매칭한다.
@@ -1741,6 +2509,8 @@ def load_cached_matching_result(force_rematch=False):
     return fetch_matching_result()
 
 #프롬포트 기반 재생성
+# 재생성 요청의 멤버 값에서 학생 이름 문자열만 뽑는다.
+# member가 dict면 여러 이름 key를 순서대로 확인하고, 아니면 문자열로 변환한다.
 def normalize_current_team_member(member: Any) -> str:
     if isinstance(member, dict):
         return (
@@ -1754,6 +2524,8 @@ def normalize_current_team_member(member: Any) -> str:
     return str(member) if member is not None else ""
 
 
+# 재생성 요청으로 들어온 팀 하나를 내부 표준 팀 구조로 변환한다.
+# 팀 이름, 멤버 이름, 총점, 역할 분포, 팀장, 기존 이유를 정규화한다.
 def normalize_current_team(team: Dict[str, Any], index: int) -> Dict[str, Any]:
     members = [
         member_name
@@ -1774,6 +2546,8 @@ def normalize_current_team(team: Dict[str, Any], index: int) -> Dict[str, Any]:
     }
 
 
+# 재생성 요청의 role_groups 값을 표준 리스트 형태로 맞춘다.
+# list/dict 입력을 모두 [{"role_group": ..., "count": ...}] 구조로 변환한다.
 def normalize_role_groups_for_regenerate(role_groups: Any) -> List[Dict[str, Any]]:
     if isinstance(role_groups, list):
         return [
@@ -1793,6 +2567,8 @@ def normalize_role_groups_for_regenerate(role_groups: Any) -> List[Dict[str, Any
     return []
 
 
+# 재생성 요청의 current_teams 전체를 표준 팀 리스트로 변환한다.
+# dict 래퍼나 잘못된 타입을 처리하고 유효한 팀 dict만 반환한다.
 def normalize_current_teams(current_teams: Any) -> List[Dict[str, Any]]:
     if not current_teams:
         return []
@@ -1807,6 +2583,8 @@ def normalize_current_teams(current_teams: Any) -> List[Dict[str, Any]]:
     ]
 
 
+# 사용자 재생성 프롬프트를 반영할 초기 LangGraph state를 만든다.
+# 분석 학생, prompt, 현재 팀을 입력받아 adjust_team_node부터 시작 가능한 상태를 반환한다.
 def build_regenerate_state(
     analyzed_students: List[Dict[str, Any]],
     prompt: str,
@@ -1859,6 +2637,8 @@ def build_regenerate_state(
     }
 
 
+# 프롬프트 기반 팀 재생성 워크플로우를 실행한다.
+# prompt와 현재 팀/분석 학생을 받아 조정-검증 루프 후 최종 상태를 저장하고 반환한다.
 def run_regenerate_workflow(
     prompt: str,
     current_teams: Optional[List[Dict[str, Any]]] = None,
@@ -1897,6 +2677,8 @@ def run_regenerate_workflow(
     return final_state
 
 
+# 일반 팀 매칭 워크플로우의 최초 state를 만든다.
+# 학생 분석 결과를 로드하고 나머지 상태 필드는 빈 값으로 초기화한다.
 def build_initial_state() -> MatchingState:
     return {
         "analyzed_students": load_analysis_output_json(), #여기서 불러온거 학생분석 analyzed state에 넣어줌
@@ -1910,6 +2692,8 @@ def build_initial_state() -> MatchingState:
     }
 
 
+# LLM 호출 실패 시 규칙 기반 팀 초안만으로 최종 결과를 만든다.
+# 기존 state와 예외를 입력받아 algorithm_fallback 상태를 반환한다.
 def build_algorithm_only_result(state: MatchingState, error: Exception) -> MatchingState:
     teams = state.get("teams") or create_initial_teams(state.get("analyzed_students", []))
     final_teams = []
@@ -1933,7 +2717,7 @@ def build_algorithm_only_result(state: MatchingState, error: Exception) -> Match
             "development_averages": team.get("development_averages", {}),
             "trait_risks": team.get("trait_risks", []),
             "preference_notes": team.get("preference_notes", []),
-            "reason": "LLM 호출이 실패하여 규칙 기반 점수, 역할군, 성향 균형으로 생성한 팀입니다.",
+            "reason": "",
         })
 
     return {
@@ -1941,20 +2725,6 @@ def build_algorithm_only_result(state: MatchingState, error: Exception) -> Match
         "teams": teams,
         "final_result": {
             "final_teams": final_teams,
-            "algorithm_teams": teams,
-            "balance_result": {
-                "is_balanced": True,
-                "need_adjustment": False,
-                "next_node": "finalize_node",
-                "algorithm_result": {},
-                "llm_result": {
-                    "team_evaluations": [],
-                },
-                "errors": [],
-                "warnings": [f"LLM fallback used: {type(error).__name__}"],
-                "adjustment_request": "",
-            },
-            "team_evaluations": [],
             "adjustment_history": [],
             "preference_rejections": build_preference_rejections(
                 final_teams,
@@ -1972,6 +2742,8 @@ def build_algorithm_only_result(state: MatchingState, error: Exception) -> Match
     }
 
 
+# 일반 팀 매칭 워크플로우의 공개 진입점이다.
+# 캐시 사용 여부를 확인하고, LangGraph 실행 실패 시 규칙 기반 fallback 결과를 저장/반환한다.
 def run_workflow(force_rematch=False):
     cached_result = load_cached_matching_result(force_rematch=force_rematch)
     if cached_result is not None:

@@ -33,7 +33,14 @@ def _as_name_list(value: Any) -> List[str]:
         names = []
         for item in value:
             if isinstance(item, dict):
-                names.append(str(item.get("name") or item.get("student_name") or "").strip())
+                names.append(str(
+                    item.get("name")
+                    or item.get("student_name")
+                    or item.get("user_id")
+                    or item.get("userId")
+                    or item.get("student_id")
+                    or ""
+                ).strip())
             else:
                 names.append(str(item).strip())
         return names
@@ -43,8 +50,10 @@ def _as_name_list(value: Any) -> List[str]:
 def normalize_preferred_members(
     student: Dict[str, Any],
     allowed_names: Optional[Set[str]] = None,
+    id_to_name: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     own_name = student.get("name")
+    own_id = student.get("user_id") or student.get("userId") or student.get("student_id")
     raw_names = _as_name_list(
         student.get("preferred_members")
         or student.get("preferredMembers")
@@ -55,24 +64,25 @@ def normalize_preferred_members(
     seen = set()
 
     for raw_name in raw_names:
+        preferred_name = (id_to_name or {}).get(raw_name, raw_name)
         if not raw_name:
             ignored.append("빈 선호 이름은 제외했습니다.")
             continue
-        if raw_name == own_name:
+        if raw_name == own_id or preferred_name == own_name:
             ignored.append(f"{raw_name} 선호는 자기 자신이라 제외했습니다.")
             continue
-        if raw_name in seen:
-            ignored.append(f"{raw_name} 선호는 중복이라 제외했습니다.")
+        if preferred_name in seen:
+            ignored.append(f"{preferred_name} 선호는 중복이라 제외했습니다.")
             continue
-        if allowed_names is not None and raw_name not in allowed_names:
+        if allowed_names is not None and preferred_name not in allowed_names:
             ignored.append(f"{raw_name} 선호는 분석 데이터에 없는 학생이라 제외했습니다.")
             continue
         if len(normalized) >= MAX_PREFERRED_MEMBERS:
-            ignored.append(f"{raw_name} 선호는 최대 3명 제한으로 제외했습니다.")
+            ignored.append(f"{preferred_name} 선호는 최대 3명 제한으로 제외했습니다.")
             continue
 
-        seen.add(raw_name)
-        normalized.append(raw_name)
+        seen.add(preferred_name)
+        normalized.append(preferred_name)
 
     return {
         "preferred_members": normalized,
@@ -83,8 +93,9 @@ def normalize_preferred_members(
 def ensure_preference_profile(
     student: Dict[str, Any],
     allowed_names: Optional[Set[str]] = None,
+    id_to_name: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
-    normalized = normalize_preferred_members(student, allowed_names=allowed_names)
+    normalized = normalize_preferred_members(student, allowed_names=allowed_names, id_to_name=id_to_name)
     wants_leader = normalize_wants_leader(
         student.get("wants_leader")
         if "wants_leader" in student
@@ -104,8 +115,18 @@ def ensure_preference_profile(
 
 def ensure_preference_profiles(students: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     allowed_names = {student.get("name") for student in students if student.get("name")}
+    id_to_name = {
+        str(student_id): student.get("name")
+        for student in students
+        for student_id in (
+            student.get("user_id"),
+            student.get("userId"),
+            student.get("student_id"),
+        )
+        if student_id and student.get("name")
+    }
     return [
-        ensure_preference_profile(student, allowed_names=allowed_names)
+        ensure_preference_profile(student, allowed_names=allowed_names, id_to_name=id_to_name)
         for student in students
     ]
 
@@ -176,8 +197,6 @@ def breaks_preference_constraints(candidate_members: List[Dict[str, Any]]) -> Li
 
     if _has_single_role_group(candidate_members):
         reasons.append("같은 역할군이 한 팀에 몰립니다.")
-    if _has_core_trait_risk(candidate_members):
-        reasons.append("핵심 성향 평균 또는 낮은 성향 분포가 기준을 벗어납니다.")
 
     return reasons
 
