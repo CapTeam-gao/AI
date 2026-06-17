@@ -34,6 +34,43 @@ def _first_present(data: Dict[str, Any], *keys: str) -> Any:
     return None
 
 
+# AI 내부 skill_level 값을 백엔드 StudentLevel enum 문자열로 변환한다.
+# 설문 직후 분석 저장 API가 UPPER/MIDDLE/LOWER 값을 바로 저장할 수 있게 한다.
+def to_backend_student_level(skill_level: str) -> str:
+    return {
+        "높음": "UPPER",
+        "상": "UPPER",
+        "보통": "MIDDLE",
+        "중": "MIDDLE",
+        "낮음": "LOWER",
+        "하": "LOWER",
+    }.get(skill_level, "MIDDLE")
+
+
+# 학생 분석 결과를 백엔드가 읽기 쉬운 응답 dict로 변환한다.
+# 기존 분석 필드는 유지하고 user_id, analysis_result, student_level을 명시적으로 보강한다.
+def build_analysis_response_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    skill_level = result.get("skill_level") or result.get("student_level") or result.get("level")
+    analysis_result = (
+        result.get("analysis_result")
+        or result.get("analysisResult")
+        or result.get("reason")
+        or result.get("strength")
+        or ""
+    )
+    return {
+        **result,
+        "user_id": (
+            result.get("user_id")
+            or result.get("userId")
+            or result.get("student_id")
+            or result.get("studentId")
+        ),
+        "analysis_result": analysis_result,
+        "student_level": to_backend_student_level(skill_level),
+    }
+
+
 # source의 성향 점수를 target에 표준 필드명으로 복사한다.
 # 입력은 원본 학생 dict이고, 출력은 target dict에 성격/개발 성향 key를 채우는 방식이다.
 def _copy_trait_scores(target: Dict[str, Any], source: Dict[str, Any]) -> None:
@@ -557,14 +594,16 @@ def teams_summary():
 
 @app.post("/analysis/run")
 # 요청 학생 목록을 정규화해 학생 분석 LLM을 실행하는 API다.
-# 분석된 학생 수와 성공 상태만 간단히 반환한다.
+# 분석된 학생 수, 성공 상태, 백엔드 저장용 분석 결과 목록을 반환한다.
 def run_analysis(students: Optional[List[Dict[str, Any]]] = Body(default=None)):
     from student_analysis.analysis_llm import get_analyze_stu
 
     results = get_analyze_stu(normalize_request_students(students))
+    response_results = [build_analysis_response_result(result) for result in results]
     return {
         "status": "ok",
         "total_students": len(results),
+        "results": response_results,
     }
 
 
