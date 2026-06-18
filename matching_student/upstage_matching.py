@@ -176,13 +176,19 @@ def get_student_score(student):
 #학생의 희망 역할을 큰 카테고리로 바꾸어줌
 #같은 분야에 사람이 한팀에 많이 들어오지 않게 하기 위해서
 # 자유 입력 역할 문자열을 매칭용 role_group으로 분류한다.
-# 프론트/백엔드/AI/앱/디자인/게임/기타 중 하나를 반환한다.
+# 프론트/백엔드/AI/앱/디자인/게임/풀스택/DevOps/보안/기타 중 하나를 반환한다.
 def get_role_group(role):
     # role은 "Frontend Developer", "백엔드 개발자", "AI 엔지니어"처럼 표현이 제각각이라
     # 큰 역할군으로 묶어서 한 팀에 같은 역할이 몰리지 않게 할 때 사용함.
     role_text = (role or "").lower()
     if any(keyword in role_text for keyword in ["unity", "unreal", "game", "게임", "유니티", "언리얼"]):
         return "game"
+    if any(keyword in role_text for keyword in ["fullstack", "full-stack", "풀스택"]):
+        return "fullstack"
+    if any(keyword in role_text for keyword in ["devops", "dev ops", "인프라", "배포", "ci/cd", "cicd"]):
+        return "devops"
+    if any(keyword in role_text for keyword in ["security", "secure", "보안", "owasp"]):
+        return "security"
     #근데 테스트 해보니까 role에서 ai하고 backend가 둘다 들어가 있을때가 있음(ai/backend엔지니어 이런느낌으로) 그거 방지도 해야할듯
     if any(keyword in role_text for keyword in ["frontend", "front", "프론트"]):
         return "frontend"
@@ -607,6 +613,9 @@ REASON_ROLE_LABELS = {
     "app": "앱",
     "design": "디자인",
     "game": "게임",
+    "fullstack": "풀스택",
+    "devops": "DevOps",
+    "security": "보안",
     "etc": "기타",
 }
 
@@ -723,7 +732,7 @@ def build_reason_context(candidate_result, analyzed_students):
 # LLM structured output에서 역할군별 인원 수를 표현하는 schema다.
 # role_group 이름과 count를 받아 FinalTeam.role_groups에 들어간다.
 class RoleGroupCount(BaseModel):
-    role_group: str = Field(description="역할군 이름. 예: frontend, backend, ai_data, game, etc")
+    role_group: str = Field(description="역할군 이름. 예: frontend, backend, ai_data, app, design, game, fullstack, devops, security, etc")
     count: int = Field(description="해당 역할군 인원 수")
 
 
@@ -799,7 +808,7 @@ def get_matching_prompt_chain():
 - 반드시 지정된 structured output schema에 맞춰 출력한다.
 - 최상위 키는 final_teams, changed, change_summary, validation_notes만 사용한다.
 	- final_teams의 각 팀은 team_name, members, total_score, role_groups, leader를 포함한다.
-		- role_groups는 [{{"role_group": "backend", "count": 1}}] 같은 배열 형식으로 작성한다.
+		- role_groups는 [{{"role_group": "backend", "count": 1}}] 같은 배열 형식으로 작성한다. 가능한 role_group은 frontend, backend, ai_data, app, design, game, fullstack, devops, security, etc이다.
 		- members는 학생 이름 문자열 배열로만 작성한다.
 		- changed는 initial_teams에서 팀원이 바뀌었으면 true, 그대로면 false다.
         - reason_cards와 reason은 작성하지 않거나 빈 값으로 둔다. 배정 이유는 최종 팀 확정 후 별도 노드에서 생성한다.
@@ -1597,7 +1606,7 @@ def get_adjust_team_prompt_chain():
     출력 규칙:
     - 반드시 지정된 structured output schema에 맞춰 출력한다.
     - final_teams의 각 팀은 team_name, members, total_score, role_groups, leader를 포함한다.
-    - role_groups는 [{{"role_group": "backend", "count": 1}}] 같은 배열 형식으로 작성한다.
+    - role_groups는 [{{"role_group": "backend", "count": 1}}] 같은 배열 형식으로 작성한다. 가능한 role_group은 frontend, backend, ai_data, app, design, game, fullstack, devops, security, etc이다.
     - members는 학생 이름 문자열 배열로만 작성한다.
     - changed는 current_candidate에서 팀원이 바뀌었으면 true, 그대로면 false다.
     - reason_cards와 reason은 작성하지 않거나 빈 값으로 둔다. 배정 이유는 최종 팀 확정 후 별도 노드에서 생성한다.
@@ -1970,6 +1979,10 @@ def build_implementation_connections(members: List[Dict[str, Any]]) -> List[Dict
         ("ai_data", "frontend", "분석 결과를 사용자가 이해할 수 있는 화면으로 풀어낼 수 있습니다."),
         ("design", "frontend", "사용자 흐름과 웹 화면 구현을 함께 다듬기 좋습니다."),
         ("design", "app", "모바일 사용 흐름과 앱 화면 구현을 함께 맞추기 좋습니다."),
+        ("fullstack", "frontend", "풀스택 경험을 화면 구현과 API 연동 사이의 조율에 활용할 수 있습니다."),
+        ("fullstack", "backend", "풀스택 경험을 서버 구조와 화면 요구사항 사이의 조율에 활용할 수 있습니다."),
+        ("devops", "backend", "배포와 서버 구현 흐름을 초반부터 함께 맞출 수 있습니다."),
+        ("security", "backend", "인증과 권한 처리 리스크를 서버 구현 단계에서 함께 점검할 수 있습니다."),
     ]
     connections = []
 
@@ -2169,14 +2182,6 @@ def get_final_team_analysis_prompt_chain():
     - "역할이 고르게 배치되어", "협업 성향이 안정적인 팀", "시너지 극대화", "동시에 만족", "알고리즘", "점수 기준" 같은 일반적이거나 기계적인 표현은 쓰지 않는다.
     - matching_evidence에 없는 소통/협업 안정성은 새로 만들어 쓰지 않는다.
     - 현재 팀원이 아닌 학생 이름은 절대 언급하지 않는다.
-
-    좋은 strengths 예시:
-    - "김민수와 이서연은 서로 선호한 관계가 반영되어 초반 역할 조율을 빠르게 시작하기 좋은 조합입니다. 김민수의 API 구현 경험과 이서연의 화면 구성 능력이 만나 기능 흐름을 사용자 화면까지 자연스럽게 이어갈 수 있습니다."
-    - "팀장 희망을 표시한 박지훈을 중심으로 AI 실험 결과를 정리하고, 최유진의 앱 구현 역량으로 결과 확인 화면까지 연결하기 좋은 팀입니다. 모델 결과를 사용자가 확인하는 흐름까지 만들 수 있어 추천 기능을 서비스 형태로 보여주기 쉽습니다."
-
-    좋은 weaknesses 예시:
-    - "백엔드 구현을 맡을 학생이 적어 API 설계와 데이터 저장 흐름이 한쪽에 몰릴 수 있습니다. 초반에는 인증이나 부가 기능보다 핵심 API 명세를 먼저 정리해 프론트엔드 연동 지연을 줄이는 방식이 필요합니다."
-    - "화면 구현 경험이 상대적으로 부족해 결과를 사용자가 이해하기 쉬운 UI로 풀어내는 데 시간이 걸릴 수 있습니다. 따라서 복잡한 화면보다 결과 확인 중심의 단순한 흐름부터 구현하는 것이 안정적입니다."
     """
 
     user_prompt = """
@@ -2197,54 +2202,21 @@ def get_final_team_analysis_prompt_chain():
 # LLM이 만든 강점/약점 문장을 화면 노출용으로 정리한다.
 # 값이 비어 있으면 알고리즘 문장으로 대체하지 않고 빈 문자열을 반환한다.
 def sanitize_team_analysis_text(value: Any) -> str:
-    text = clean_reason_sections(str(value or "").strip())
+    text = normalize_reason_text(value)
+    text = re.sub(r"^\s*\[(?:강점|보완점|약점|리스크)\]\s*", "", text).strip()
     return text
-
-#팀 강점/약점 생성 worker
-#llm으로 강점약점 생성 worker
-def parallelization_strength_weakness(team: Dict[str, Any], analyzed_students: List[Dict[str, Any]]) -> Dict[str, Any]:
-    fixed_team = dict(team)
-
-    try:
-        analysis_context = build_team_analysis_context([team], analyzed_students)
-        llm = get_llm()
-        structured_llm = llm.with_structured_output(FinalTeamAnalysisResult)
-        chain = get_final_team_analysis_prompt_chain() | structured_llm
-        response = chain.invoke({
-            "reason_context": dumps_llm_context(analysis_context),
-        })
-        result = response.model_dump() if hasattr(response, "model_dump") else response
-    except Exception as error:
-        print(f"{team.get('team_name')} 강점/약점 생성 실패: {type(error).__name__}: {error}")
-        fixed_team["strengths"] = ""
-        fixed_team["weaknesses"] = ""
-        fixed_team["analysis_generation_error"] = f"{type(error).__name__}: {error}"
-        return fixed_team
-
-    generated = next(
-        (
-            generated_team
-            for generated_team in result.get("teams", [])
-            if isinstance(generated_team, dict)
-            and generated_team.get("team_name") == fixed_team.get("team_name")
-        ),
-        {},
-    )
-    fixed_team["strengths"] = sanitize_team_analysis_text(generated.get("strengths"))
-    fixed_team["weaknesses"] = sanitize_team_analysis_text(generated.get("weaknesses"))
-    return fixed_team
-
-
 
 #공통 helper에 강점/약점 worker를 넘기는 얇은 wrapper
 #병렬처리 설정과 학생강점약점 생성 불러와서 병렬로 처리하는 함수
 def run_parallel_strength_weakness(final_teams, analyzed_students):
-    return run_parallel_team_tasks(
+    return run_parallel_team_batches(
         final_teams=final_teams,
         analyzed_students=analyzed_students,
-        worker_fn=parallelization_strength_weakness, #어떤 작업을 병렬로 할 것인가
+        worker_fn=parallelization_strength_weakness_batch, #어떤 작업을 병렬로 할 것인가
         worker_env_name="FINAL_ANALYSIS_WORKERS",
+        batch_env_name="FINAL_ANALYSIS_BATCH_SIZE",
         default_workers=3,
+        default_batch_size=6,
         error_fields={
             "strengths": "",
             "weaknesses": "",
@@ -2254,15 +2226,21 @@ def run_parallel_strength_weakness(final_teams, analyzed_students):
     )
 
 
-#팀 병렬 실행 helper
-#병렬로 돌아갈수 있게 설정
-#팀 목록과 worker 함수를 받아 여러 팀을 병렬로 처리하고, 결과 순서를 유지한다.
-def run_parallel_team_tasks(
+def chunk_team_batches(teams: List[Dict[str, Any]], batch_size: int) -> List[List[Dict[str, Any]]]:
+    return [
+        teams[index:index + batch_size]
+        for index in range(0, len(teams), batch_size)
+    ]
+
+
+def run_parallel_team_batches(
     final_teams,
     analyzed_students,
     worker_fn,
     worker_env_name: str,
+    batch_env_name: str,
     default_workers: int = 3,
+    default_batch_size: int = 6,
     error_fields: Optional[Dict[str, Any]] = None,
     error_key: str = "generation_error",
     task_label: str = "팀 설명",
@@ -2272,27 +2250,79 @@ def run_parallel_team_tasks(
         return []
 
     max_workers = max(1, int(os.getenv(worker_env_name, str(default_workers))))
-    results = [None] * len(teams)
+    batch_size = max(1, int(os.getenv(batch_env_name, str(default_batch_size))))
+    batches = chunk_team_batches(teams, batch_size)
+    results = [None] * len(batches)
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor: #ThreadPoolExecutor 병렬화 하는 도구
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
-            executor.submit(worker_fn, team, analyzed_students): index
-            for index, team in enumerate(teams)
+            executor.submit(worker_fn, batch, analyzed_students): index
+            for index, batch in enumerate(batches)
         }
         for future in as_completed(futures):
             index = futures[future]
+            batch = batches[index]
             try:
                 results[index] = future.result()
             except Exception as error:
-                team = teams[index]
-                print(f"{team.get('team_name')} {task_label} 병렬 처리 실패: {type(error).__name__}: {error}")
-                results[index] = {
-                    **team,
-                    **(error_fields or {}),
-                    error_key: f"{type(error).__name__}: {error}",
-                }
+                batch_names = ", ".join(team.get("team_name", "") for team in batch)
+                print(f"{batch_names} {task_label} batch 처리 실패: {type(error).__name__}: {error}")
+                results[index] = [
+                    {
+                        **team,
+                        **(error_fields or {}),
+                        error_key: f"{type(error).__name__}: {error}",
+                    }
+                    for team in batch
+                ]
 
-    return [result for result in results if result is not None]
+    fixed_teams = []
+    for batch_result in results:
+        if batch_result:
+            fixed_teams.extend(batch_result)
+    return fixed_teams
+
+
+def parallelization_strength_weakness_batch(
+    teams: List[Dict[str, Any]],
+    analyzed_students: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    try:
+        analysis_context = build_team_analysis_context(teams, analyzed_students)
+        llm = get_llm()
+        structured_llm = llm.with_structured_output(FinalTeamAnalysisResult)
+        chain = get_final_team_analysis_prompt_chain() | structured_llm
+        response = chain.invoke({
+            "reason_context": dumps_llm_context(analysis_context),
+        })
+        result = response.model_dump() if hasattr(response, "model_dump") else response
+    except Exception as error:
+        batch_names = ", ".join(team.get("team_name", "") for team in teams)
+        print(f"{batch_names} 강점/약점 생성 실패: {type(error).__name__}: {error}")
+        return [
+            {
+                **team,
+                "strengths": "",
+                "weaknesses": "",
+                "analysis_generation_error": f"{type(error).__name__}: {error}",
+            }
+            for team in teams
+        ]
+
+    analysis_by_team = {
+        team.get("team_name"): team
+        for team in result.get("teams", [])
+        if isinstance(team, dict)
+    }
+    fixed_teams = []
+    for team in teams:
+        fixed_team = dict(team)
+        generated = analysis_by_team.get(fixed_team.get("team_name"), {})
+        fixed_team["strengths"] = sanitize_team_analysis_text(generated.get("strengths"))
+        fixed_team["weaknesses"] = sanitize_team_analysis_text(generated.get("weaknesses"))
+        fixed_teams.append(fixed_team)
+
+    return fixed_teams
 
 
 # 최종 팀 목록에 대해 LLM으로 강점/약점 문장을 생성한다.
@@ -2357,8 +2387,6 @@ def get_final_reason_cards_prompt_chain():
     - "리더십 중심의 팀 운영 가능", "팀장 희망을 반영한 운영 중심 팀"은 팀장 희망 반영이 이 팀의 가장 중요한 이유일 때만 사용한다.
     - 각 description은 제목을 반복하지 말고 130~220자 정도의 2~3문장으로 작성한다.
     - 모든 description 문장은 관리자 화면에 그대로 노출된다. 반드시 존댓말로 작성하고, 모든 문장 끝은 "-습니다", "-입니다", "-됩니다", "-합니다" 중 하나로 끝낸다.
-    - 절대 쓰면 안 되는 종결: "한다", "된다", "높인다", "해소한다", "유지한다", "기대된다", "가능하다", "충족시킨다".
-    - 절대 쓰면 안 되는 표현: "알고리즘", "규칙 기반", "fallback", "점수 기준", "균형 계산", "시너지 극대화", "동시에 만족", "품질을 높인다".
     - 각 reason_card는 서로 다른 배정 근거를 담는다. 같은 말을 제목만 바꿔 반복하지 않는다.
     - 두 카드 중 최소 1개는 matching_evidence.key_placements 또는 preference.matched를 반영한다.
     - 최소 1개는 matching_evidence.implementation_connections를 반영해 역할 간 구현 흐름을 설명한다.
@@ -2376,10 +2404,6 @@ def get_final_reason_cards_prompt_chain():
     - 숫자 점수는 되도록 쓰지 말고 "소통이 낮은 편", "책임감이 높은 편", "구현 경험이 풍부한 편"처럼 자연어로 표현한다.
     - reason은 reason_cards의 모든 description을 공백으로 이어 붙여 작성한다.
 
-    좋은 문장 예시:
-    - "김민수가 선호한 이서연을 같은 팀에 배치해 초반 요구사항 정리와 화면 흐름 조율을 빠르게 시작할 수 있습니다. 김민수의 API 구현 강점과 이서연의 화면 구성 능력이 만나 기능 흐름을 사용자 화면까지 자연스럽게 이어갈 수 있습니다."
-    - "팀장 희망을 표시한 박지훈을 운영 중심에 두고, 최유진의 앱 구현 역량을 연결해 분석 결과를 실제 모바일 기능으로 확장하기 좋습니다. 모델 결과를 사용자가 확인하는 흐름까지 만들 수 있어 같은 팀에 배정했습니다."
-    - "김성현은 핵심 기능 구현에 강점이 있고, 소통이 안정적인 팀원이 요구사항 정리와 일정 조율을 보완할 수 있습니다. 개발 속도와 협업 안정성을 함께 가져갈 수 있어 이 조합으로 매칭했습니다."
 
     나쁜 문장 예시:
     - "백엔드, 프론트엔드, 디자인, 앱, AI 역할이 고르게 배치되어 각 담당자가 맡은 범위에 집중하기 쉬운 구성입니다."
@@ -2404,13 +2428,12 @@ def get_final_reason_cards_prompt_chain():
         ("human", user_prompt),
     ])
 
-#팀 배정이유 생성 worker
-#llm으로 배정이유 생성 worker
-def parallelization_reason_cards(team: Dict[str, Any], analyzed_students: List[Dict[str, Any]]) -> Dict[str, Any]:
-    fixed_team = dict(team)
-
+def parallelization_reason_cards_batch(
+    teams: List[Dict[str, Any]],
+    analyzed_students: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
     try:
-        reason_context = build_reason_card_context([team], analyzed_students)
+        reason_context = build_reason_card_context(teams, analyzed_students)
         llm = get_llm()
         structured_llm = llm.with_structured_output(FinalReasonCardsResult)
         chain = get_final_reason_cards_prompt_chain() | structured_llm
@@ -2419,34 +2442,44 @@ def parallelization_reason_cards(team: Dict[str, Any], analyzed_students: List[D
         })
         result = response.model_dump() if hasattr(response, "model_dump") else response
     except Exception as error:
-        print(f"{team.get('team_name')} 배정 이유 생성 실패: {type(error).__name__}: {error}")
-        fixed_team["reason_cards"] = []
-        fixed_team["reason"] = ""
-        fixed_team["reason_generation_error"] = f"{type(error).__name__}: {error}"
-        return fixed_team
+        batch_names = ", ".join(team.get("team_name", "") for team in teams)
+        print(f"{batch_names} 배정 이유 생성 실패: {type(error).__name__}: {error}")
+        return [
+            {
+                **team,
+                "reason_cards": [],
+                "reason": "",
+                "reason_generation_error": f"{type(error).__name__}: {error}",
+            }
+            for team in teams
+        ]
 
-    generated = next(
-        (
-            generated_team
-            for generated_team in result.get("teams", [])
-            if isinstance(generated_team, dict)
-            and generated_team.get("team_name") == fixed_team.get("team_name")
-        ),
-        {},
-    )
-    fixed_team["reason_cards"] = generated.get("reason_cards") or []
-    fixed_team["reason"] = generated.get("reason", "")
-    return fixed_team
+    cards_by_team = {
+        team.get("team_name"): team
+        for team in result.get("teams", [])
+        if isinstance(team, dict)
+    }
+    fixed_teams = []
+    for team in teams:
+        fixed_team = dict(team)
+        generated = cards_by_team.get(fixed_team.get("team_name"), {})
+        fixed_team["reason_cards"] = generated.get("reason_cards") or []
+        fixed_team["reason"] = generated.get("reason", "")
+        fixed_teams.append(fixed_team)
+
+    return fixed_teams
 
 #공통 helper에 배정이유 worker를 넘기는 얇은 wrapper
 #병렬처리 설정과 배정이유 생성 불러와서 병렬로 처리하도록 하게하는 함수
 def run_parallel_reason_cards(final_teams, analyzed_students):
-    return run_parallel_team_tasks(
+    return run_parallel_team_batches(
         final_teams=final_teams,
         analyzed_students=analyzed_students,
-        worker_fn=parallelization_reason_cards,
+        worker_fn=parallelization_reason_cards_batch,
         worker_env_name="FINAL_REASON_WORKERS",
+        batch_env_name="FINAL_REASON_BATCH_SIZE",
         default_workers=3,
+        default_batch_size=6,
         error_fields={
             "reason_cards": [],
             "reason": "",
@@ -2530,8 +2563,8 @@ def finalize_node(state: MatchingState) -> Dict[str, Any]:
         team_evaluations = state.get("team_evaluations", [])
 
     enriched_teams = enrich_final_teams(candidate_teams, analyzed_students)
-    analyzed_teams = generate_final_team_analysis(enriched_teams, analyzed_students)
-    final_teams = generate_final_reason_cards(analyzed_teams, analyzed_students)
+    analyzed_teams = run_parallel_strength_weakness(enriched_teams, analyzed_students)
+    final_teams = run_parallel_reason_cards(analyzed_teams, analyzed_students)
 
     final_result = {
         "final_teams": final_teams,
