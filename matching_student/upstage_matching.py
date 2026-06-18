@@ -1,5 +1,6 @@
 from langchain_upstage import ChatUpstage
 from typing import Any,List,TypedDict,Dict,Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import copy
 import os
 import json
@@ -1802,19 +1803,15 @@ def collect_representative_stacks_for_reason(members: List[Dict[str, Any]], limi
     return stacks
 
 
-# 이유 생성용 긴 텍스트를 한 줄로 정리하고 limit 길이로 줄인다.
+# 이유 생성 context에 넣을 학생 분석 텍스트를 자르지 않고 한 줄로 정리한다.
 # 리스트는 문자열로 합치고 None은 빈 문자열로 반환한다.
-def compact_reason_text(value: Any, limit: int = 90) -> str:
+def normalize_reason_text(value: Any) -> str:
     if isinstance(value, list):
         value = " ".join(str(item) for item in value if item)
     if value is None:
         return ""
 
-    text = re.sub(r"\s+", " ", str(value)).strip()
-    if len(text) <= limit:
-        return text
-
-    return text[:limit].rstrip() + "..."
+    return re.sub(r"\s+", " ", str(value)).strip()
 
 
 # 팀 내 역할 분포가 어떤 배정 근거가 되는지 짧게 정리한다.
@@ -2046,9 +2043,11 @@ def build_public_matching_evidence(matching_evidence: Dict[str, Any]) -> Dict[st
     }
 
 
-# 최종 이유 카드 LLM에 넣을 팀별 context를 만든다.
-# 팀별 멤버, 리더, 프로필 요약, 공개 가능한 매칭 근거만 반환한다.
-def build_reason_card_context(final_teams, analyzed_students):
+def dumps_llm_context(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def build_final_team_context(final_teams, analyzed_students, trait_complement_limit: int = 3):
     student_lookup = build_student_lookup(analyzed_students)
     contexts = []
 
@@ -2079,9 +2078,9 @@ def build_reason_card_context(final_teams, analyzed_students):
                     "name": member.get("name"),
                     "role": get_reason_role_label(member.get("role_group") or get_role_group(member.get("role"))),
                     "top_skills": parse_reason_stack_names(member.get("stack_score", ""), limit=2),
-                    "experience": compact_reason_text(member.get("experience", []), limit=90),
-                    "strength": compact_reason_text(member.get("strength"), limit=90),
-                    "suggestion": compact_reason_text(member.get("suggestion"), limit=110),
+                    "strength": normalize_reason_text(member.get("strength")),
+                    "suggestion": normalize_reason_text(member.get("suggestion")),
+                    "experience": normalize_reason_text(member.get("experience", [])),
                 }
                 for member in members
             ],
@@ -2092,12 +2091,30 @@ def build_reason_card_context(final_teams, analyzed_students):
             ],
             "trait_complements": [
                 {"trait": complement.get("label")}
-                for complement in build_trait_complements(members)[:3]
+                for complement in build_trait_complements(members)[:trait_complement_limit]
                 if complement.get("label")
             ],
         })
 
     return contexts
+
+
+# 최종 이유 카드 LLM에 넣을 팀별 context를 만든다.
+# 팀별 멤버, 리더, 학생 분석 근거, 공개 가능한 매칭 근거를 반환한다.
+def build_reason_card_context(final_teams, analyzed_students):
+    return build_final_team_context(
+        final_teams,
+        analyzed_students,
+        trait_complement_limit=3,
+    )
+
+
+def build_team_analysis_context(final_teams, analyzed_students):
+    return build_final_team_context(
+        final_teams,
+        analyzed_students,
+        trait_complement_limit=2,
+    )
 
 
 # 최종 이유 카드 LLM이 팀 하나에 대해 반환해야 하는 schema다.
@@ -2183,20 +2200,115 @@ def sanitize_team_analysis_text(value: Any) -> str:
     text = clean_reason_sections(str(value or "").strip())
     return text
 
+#팀 강점/약점 생성 worker
+#llm으로 강점약점 생성 worker
+def parallelization_strength_weakness(team: Dict[str, Any], analyzed_students: List[Dict[str, Any]]) -> Dict[str, Any]:
+    fixed_team = dict(team)
+
+    try:
+        analysis_context = build_team_analysis_context([team], analyzed_students)
+        llm = get_llm()
+        structured_llm = llm.with_structured_output(FinalTeamAnalysisResult)
+        chain = get_final_team_analysis_prompt_chain() | structured_llm
+        response = chain.invoke({
+            "reason_context": dumps_llm_context(analysis_context),
+        })
+        result = response.model_dump() if hasattr(response, "model_dump") else response
+    except Exception as error:
+        print(f"{team.get('team_name')} 강점/약점 생성 실패: {type(error).__name__}: {error}")
+        fixed_team["strengths"] = ""
+        fixed_team["weaknesses"] = ""
+        fixed_team["analysis_generation_error"] = f"{type(error).__name__}: {error}"
+        return fixed_team
+
+    generated = next(
+        (
+            generated_team
+            for generated_team in result.get("teams", [])
+            if isinstance(generated_team, dict)
+            and generated_team.get("team_name") == fixed_team.get("team_name")
+        ),
+        {},
+    )
+    fixed_team["strengths"] = sanitize_team_analysis_text(generated.get("strengths"))
+    fixed_team["weaknesses"] = sanitize_team_analysis_text(generated.get("weaknesses"))
+    return fixed_team
+
+
+
+#공통 helper에 강점/약점 worker를 넘기는 얇은 wrapper
+#병렬처리 설정과 학생강점약점 생성 불러와서 병렬로 처리하는 함수
+def run_parallel_strength_weakness(final_teams, analyzed_students):
+    return run_parallel_team_tasks(
+        final_teams=final_teams,
+        analyzed_students=analyzed_students,
+        worker_fn=parallelization_strength_weakness, #어떤 작업을 병렬로 할 것인가
+        worker_env_name="FINAL_ANALYSIS_WORKERS",
+        default_workers=3,
+        error_fields={
+            "strengths": "",
+            "weaknesses": "",
+        }, #error 발생시 빈필드
+        error_key="analysis_generation_error",
+        task_label="강점/약점",
+    )
+
+
+#팀 병렬 실행 helper
+#병렬로 돌아갈수 있게 설정
+#팀 목록과 worker 함수를 받아 여러 팀을 병렬로 처리하고, 결과 순서를 유지한다.
+def run_parallel_team_tasks(
+    final_teams,
+    analyzed_students,
+    worker_fn,
+    worker_env_name: str,
+    default_workers: int = 3,
+    error_fields: Optional[Dict[str, Any]] = None,
+    error_key: str = "generation_error",
+    task_label: str = "팀 설명",
+):
+    teams = get_candidate_teams(final_teams)
+    if not teams:
+        return []
+
+    max_workers = max(1, int(os.getenv(worker_env_name, str(default_workers))))
+    results = [None] * len(teams)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor: #ThreadPoolExecutor 병렬화 하는 도구
+        futures = {
+            executor.submit(worker_fn, team, analyzed_students): index
+            for index, team in enumerate(teams)
+        }
+        for future in as_completed(futures):
+            index = futures[future]
+            try:
+                results[index] = future.result()
+            except Exception as error:
+                team = teams[index]
+                print(f"{team.get('team_name')} {task_label} 병렬 처리 실패: {type(error).__name__}: {error}")
+                results[index] = {
+                    **team,
+                    **(error_fields or {}),
+                    error_key: f"{type(error).__name__}: {error}",
+                }
+
+    return [result for result in results if result is not None]
+
 
 # 최종 팀 목록에 대해 LLM으로 강점/약점 문장을 생성한다.
 # 실패하거나 누락된 팀은 알고리즘 fallback 없이 strengths/weaknesses를 비워 둔다.
 def generate_final_team_analysis(final_teams, analyzed_students):
     try:
-        reason_context = build_reason_card_context(final_teams, analyzed_students)
+        analysis_context = build_team_analysis_context(final_teams, analyzed_students)
         llm = get_llm()
         structured_llm = llm.with_structured_output(FinalTeamAnalysisResult)
         chain = get_final_team_analysis_prompt_chain() | structured_llm
         response = chain.invoke({
-            "reason_context": json.dumps(reason_context, ensure_ascii=False, indent=2),
+            "reason_context": dumps_llm_context(analysis_context),
         })
         result = response.model_dump() if hasattr(response, "model_dump") else response
-    except Exception:
+    except Exception as error:
+        print(f"최종 팀 강점/약점 생성 실패: {type(error).__name__}: {error}")
         return [
             {
                 **team,
@@ -2220,6 +2332,8 @@ def generate_final_team_analysis(final_teams, analyzed_students):
         fixed_teams.append(fixed_team)
 
     return fixed_teams
+
+
 
 
 # 최종 확정 팀의 관리자 노출용 reason_cards 생성 프롬프트를 만든다.
@@ -2290,6 +2404,57 @@ def get_final_reason_cards_prompt_chain():
         ("human", user_prompt),
     ])
 
+#팀 배정이유 생성 worker
+#llm으로 배정이유 생성 worker
+def parallelization_reason_cards(team: Dict[str, Any], analyzed_students: List[Dict[str, Any]]) -> Dict[str, Any]:
+    fixed_team = dict(team)
+
+    try:
+        reason_context = build_reason_card_context([team], analyzed_students)
+        llm = get_llm()
+        structured_llm = llm.with_structured_output(FinalReasonCardsResult)
+        chain = get_final_reason_cards_prompt_chain() | structured_llm
+        response = chain.invoke({
+            "reason_context": dumps_llm_context(reason_context),
+        })
+        result = response.model_dump() if hasattr(response, "model_dump") else response
+    except Exception as error:
+        print(f"{team.get('team_name')} 배정 이유 생성 실패: {type(error).__name__}: {error}")
+        fixed_team["reason_cards"] = []
+        fixed_team["reason"] = ""
+        fixed_team["reason_generation_error"] = f"{type(error).__name__}: {error}"
+        return fixed_team
+
+    generated = next(
+        (
+            generated_team
+            for generated_team in result.get("teams", [])
+            if isinstance(generated_team, dict)
+            and generated_team.get("team_name") == fixed_team.get("team_name")
+        ),
+        {},
+    )
+    fixed_team["reason_cards"] = generated.get("reason_cards") or []
+    fixed_team["reason"] = generated.get("reason", "")
+    return fixed_team
+
+#공통 helper에 배정이유 worker를 넘기는 얇은 wrapper
+#병렬처리 설정과 배정이유 생성 불러와서 병렬로 처리하도록 하게하는 함수
+def run_parallel_reason_cards(final_teams, analyzed_students):
+    return run_parallel_team_tasks(
+        final_teams=final_teams,
+        analyzed_students=analyzed_students,
+        worker_fn=parallelization_reason_cards,
+        worker_env_name="FINAL_REASON_WORKERS",
+        default_workers=3,
+        error_fields={
+            "reason_cards": [],
+            "reason": "",
+        },
+        error_key="reason_generation_error",
+        task_label="배정 이유",
+    )
+
 
 # 최종 팀 목록에 대해 LLM으로 배정 이유 카드를 생성한다.
 # LLM이 준 reason_cards/reason을 별도 보정 없이 팀별로 병합한다.
@@ -2300,10 +2465,11 @@ def generate_final_reason_cards(final_teams, analyzed_students):
         structured_llm = llm.with_structured_output(FinalReasonCardsResult)
         chain = get_final_reason_cards_prompt_chain() | structured_llm
         response = chain.invoke({
-            "reason_context": json.dumps(reason_context, ensure_ascii=False, indent=2),
+            "reason_context": dumps_llm_context(reason_context),
         })
         result = response.model_dump() if hasattr(response, "model_dump") else response
-    except Exception:
+    except Exception as error:
+        print(f"최종 팀 배정 이유 생성 실패: {type(error).__name__}: {error}")
         return get_candidate_teams(final_teams)
 
     cards_by_team = {
@@ -2320,15 +2486,6 @@ def generate_final_reason_cards(final_teams, analyzed_students):
         fixed_teams.append(fixed_team)
 
     return fixed_teams
-
-
-
-
-
-
-
-
-
 
 
 #최종 설명노드
