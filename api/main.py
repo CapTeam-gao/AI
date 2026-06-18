@@ -289,9 +289,15 @@ def get_student_top_stack_scores(student: Dict[str, Any], limit: int = 2) -> Lis
 
 
 # 자유 입력 역할 문자열을 화면/집계용 role_group으로 분류한다.
-# 프론트, 백엔드, AI, 앱, 디자인, 게임, 기타 중 하나를 반환한다.
+# 프론트, 백엔드, AI, 앱, 디자인, 게임, 풀스택, DevOps, 보안, 기타 중 하나를 반환한다.
 def get_display_role_group(role: str) -> str:
     role_text = (role or "").lower()
+    if any(keyword in role_text for keyword in ["fullstack", "full-stack", "풀스택"]):
+        return "fullstack"
+    if any(keyword in role_text for keyword in ["devops", "dev ops", "인프라", "배포", "ci/cd", "cicd"]):
+        return "devops"
+    if any(keyword in role_text for keyword in ["security", "secure", "보안", "owasp"]):
+        return "security"
     if any(keyword in role_text for keyword in ["frontend", "front", "프론트"]):
         return "frontend"
     if any(keyword in role_text for keyword in ["backend", "back", "server", "서버", "백엔드"]):
@@ -527,35 +533,29 @@ def build_team_summary(matching_output: Dict[str, Any] = None) -> Dict[str, Any]
         leader_name = final_team.get("leader") or leader_member.get("name")
         matching_reason = clean_reason_sections(final_team.get("reason", ""))
         reason_cards = normalize_reason_cards(final_team, matching_reason)
-        strengths = (
-            final_team.get("strengths", "")
-            if "strengths" in final_team
-            else first_text(
-                final_team.get("strength"),
-                evaluation.get("strengths"),
-                summarize_team_analysis(
-                    member_names,
-                    student_map,
-                    "strength",
-                    matching_reason,
-                ),
-            )
+        strengths = first_text(
+            final_team.get("strengths"),
+            final_team.get("strength"),
+            evaluation.get("strengths"),
+            summarize_team_analysis(
+                member_names,
+                student_map,
+                "strength",
+                matching_reason,
+            ),
         )
-        weaknesses = (
-            final_team.get("weaknesses", "")
-            if "weaknesses" in final_team
-            else first_text(
-                final_team.get("weakness"),
-                final_team.get("risks"),
-                evaluation.get("weaknesses"),
-                evaluation.get("risks"),
-                summarize_team_analysis(
-                    member_names,
-                    student_map,
-                    "weakness",
-                    "뚜렷한 팀 약점은 확인되지 않았습니다.",
-                ),
-            )
+        weaknesses = first_text(
+            final_team.get("weaknesses"),
+            final_team.get("weakness"),
+            final_team.get("risks"),
+            evaluation.get("weaknesses"),
+            evaluation.get("risks"),
+            summarize_team_analysis(
+                member_names,
+                student_map,
+                "weakness",
+                "뚜렷한 팀 약점은 확인되지 않았습니다.",
+            ),
         )
 
         teams.append({
