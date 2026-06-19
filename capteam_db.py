@@ -95,6 +95,12 @@ def _normalize_student(row: Dict[str, Any]) -> Dict[str, Any]:
         or student.get("preferredMembers")
         or row.get("preferred_members")
     )
+    student["response_reliability"] = (
+        student.get("response_reliability")
+        or student.get("responseReliability")
+        or row.get("response_reliability")
+        or "HIGH"
+    )
     student["wants_leader"] = _as_bool(
         student.get("wants_leader")
         if "wants_leader" in student
@@ -128,10 +134,12 @@ def fetch_students() -> List[Dict[str, Any]]:
                 u.development_implementation AS implementation,
                 u.development_learning_ability AS learningAbility,
                 u.development_planning AS planning,
+                COALESCE(ua.response_reliability, 'HIGH') AS response_reliability,
                 (SELECT JSON_ARRAYAGG(skill) FROM user_skill WHERE user_user_id = u.user_id) AS stack,
                 (SELECT JSON_ARRAYAGG(experience) FROM user_experience WHERE user_user_id = u.user_id) AS experience,
                 (SELECT JSON_ARRAYAGG(preferred_teammates) FROM user_preferred_teammates WHERE user_user_id = u.user_id) AS preferred_members
             FROM users u
+            LEFT JOIN user_analysis ua ON ua.user_id = u.user_id
             WHERE u.account_role = 'STUDENT'
               AND u.survey_completed = b'1'
             ORDER BY u.user_id

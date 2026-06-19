@@ -21,6 +21,33 @@ DEVELOPMENT_TRAITS = [
 CORE_RISK_TRAITS = ["communication", "responsibility", "implementation", "problemSolving"]
 TRAIT_LABELS = dict(PERSONALITY_TRAITS + DEVELOPMENT_TRAITS)
 NEUTRAL_SCORE = 3
+NEUTRAL_TRAIT_SCORE = NEUTRAL_SCORE * 6
+RESPONSE_RELIABILITY_WEIGHTS = {
+    "HIGH": 1.0,
+    "MEDIUM": 0.6,
+    "LOW": 0.25,
+}
+
+
+def normalize_response_reliability(value: Any) -> str:
+    if value is None:
+        return "HIGH"
+    reliability = str(value).strip().upper()
+    if reliability in RESPONSE_RELIABILITY_WEIGHTS:
+        return reliability
+    return "HIGH"
+
+
+def get_response_reliability(student: Dict[str, Any]) -> str:
+    return normalize_response_reliability(
+        student.get("response_reliability")
+        or student.get("responseReliability")
+        or student.get("response_reliability_level")
+    )
+
+
+def get_response_reliability_weight(student: Dict[str, Any]) -> float:
+    return RESPONSE_RELIABILITY_WEIGHTS.get(get_response_reliability(student), 1.0)
 
 
 def normalize_trait_score(value: Any) -> int:
@@ -119,12 +146,16 @@ def build_matching_traits(personality_scores: Dict[str, int], development_scores
 
 def ensure_trait_profile(student: Dict[str, Any], source: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     data = {**(source or {}), **student}
+    response_reliability = get_response_reliability(data)
     personality_scores = _build_scores(data, PERSONALITY_TRAITS)
     development_scores = _build_scores(data, DEVELOPMENT_TRAITS)
     matching_traits = build_matching_traits(personality_scores, development_scores)
     matching_traits["defaulted_traits"] = get_defaulted_traits(data)
+    matching_traits["response_reliability"] = response_reliability
+    matching_traits["response_reliability_weight"] = get_response_reliability_weight(data)
 
     enriched = dict(student)
+    enriched["response_reliability"] = response_reliability
     enriched["personality_scores"] = personality_scores
     enriched["development_scores"] = development_scores
     enriched["personality_summary"] = build_trait_summary(personality_scores)
@@ -142,7 +173,9 @@ def get_trait_average(student: Dict[str, Any]) -> float:
 
 
 def get_trait_score(student: Dict[str, Any]) -> float:
-    return get_trait_average(student) * 6
+    raw_trait_score = get_trait_average(student) * 6
+    reliability_weight = get_response_reliability_weight(student)
+    return NEUTRAL_TRAIT_SCORE + (raw_trait_score - NEUTRAL_TRAIT_SCORE) * reliability_weight
 
 
 def get_all_trait_scores(student: Dict[str, Any]) -> Dict[str, int]:

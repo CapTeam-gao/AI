@@ -44,8 +44,11 @@ DELETE FROM user_experience WHERE user_user_id LIKE 'stu23%';
 DELETE FROM user_preferred_teammates WHERE user_user_id LIKE 'stu23%';
 DELETE FROM users WHERE user_id LIKE 'stu23%';
 
-DELETE FROM student_analysis_results;
-DELETE FROM team_matching_results;
+DELETE FROM student_analysis_results
+WHERE JSON_UNQUOTE(JSON_EXTRACT(result_json, '$[0].grade')) = 'GRADE_2';
+
+DELETE FROM team_matching_results
+WHERE JSON_UNQUOTE(JSON_EXTRACT(result_json, '$.analyzed_students[0].grade')) = 'GRADE_2';
 
 SET FOREIGN_KEY_CHECKS=1;
 
@@ -144,23 +147,8 @@ INSERT INTO user_experience (user_user_id, experience) VALUES
 ('stu2320', 'MVVM 구조로 View와 API 호출 로직을 분리해 화면 테스트와 기능 수정이 쉽도록 정리한 경험이 있습니다.');
 
 INSERT INTO user_preferred_teammates (user_user_id, preferred_teammates) VALUES
-('stu2301', 'stu2302'), ('stu2301', 'stu2306'),
-('stu2302', 'stu2301'),
-('stu2303', 'stu2308'), ('stu2303', 'stu2314'),
-('stu2304', 'stu2309'),
-('stu2305', 'stu2310'), ('stu2305', 'stu2320'),
-('stu2306', 'stu2301'),
-('stu2307', 'stu2318'),
-('stu2308', 'stu2303'),
-('stu2309', 'stu2304'), ('stu2309', 'stu2315'),
-('stu2310', 'stu2305'),
-('stu2311', 'stu2312'), ('stu2311', 'stu2317'),
-('stu2312', 'stu2311'),
-('stu2313', 'stu2317'),
-('stu2314', 'stu2303'),
-('stu2315', 'stu2309'),
-('stu2316', 'stu2320'),
-('stu2317', 'stu2311'),
-('stu2318', 'stu2307'),
-('stu2319', 'stu2312'),
-('stu2320', 'stu2305'), ('stu2320', 'stu2316');
+('stu2301', 'stu2302'),
+('stu2303', 'stu2308'),
+('stu2305', 'stu2310'),
+('stu2311', 'stu2317'),
+('stu2318', 'stu2307');

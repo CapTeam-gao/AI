@@ -122,6 +122,10 @@ def normalize_request_students(students: Optional[List[Dict[str, Any]]]) -> Opti
             _first_present(student, "preferred_members", "preferredMembers", "preferredTeammates")
             or []
         )
+        normalized["response_reliability"] = (
+            _first_present(student, "response_reliability", "responseReliability")
+            or "HIGH"
+        )
         normalized["grade"] = _first_present(student, "grade")
         _copy_trait_scores(normalized, student)
         normalized_students.append(normalized)
