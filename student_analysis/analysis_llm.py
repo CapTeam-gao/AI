@@ -29,11 +29,11 @@ from capteam_traits import ensure_trait_profile
 #클로드코드, codex한번 사서 써봐야할듯.
 #이름 말고 학번으로 주 식별자.
 #지금 매칭로직에서 score들이 되게 중요함 그래서 score들 점수를 잘 매겨야할듯. 상중하도 
-def get_llm(model = "solar-pro3"):
-    llm = ChatUpstage(
-        model=model,
-        temperature=0,
-    ) #모델 랜덤성이 좀 있길레 temperature=0으로 해줌
+#객체를 계속만들어서 return하면 계속 객체 하나하나 마다 호출되서 한번호출하고 계속쓰는 방식으로 변경
+llm = ChatUpstage(
+        model='solar-pro3',
+        temperature=0,)
+def get_llm(): #모델 랜덤성이 좀 있길레 temperature=0으로 해줌
     return llm
 
 
