@@ -35,6 +35,7 @@ from capteam_traits import (
     get_high_trait_names,
     get_leader_score,
     get_low_trait_names,
+    get_response_reliability,
     get_trait_score,
 )
 #역할을 다양하게 균형 잡힌 팀 1순위 , 선호팀원 2순위 
@@ -220,6 +221,7 @@ def make_student_summary(student):
         "score": matching_score,
         "technical_score": technical_score,
         "trait_score": trait_score,
+        "response_reliability": get_response_reliability(student),
         "role": role, #학생이 원하는 역할 
         "role_group": get_role_group(role), #팀에서 할 역할
         "stack_score": student.get("stack_score", ""),
@@ -2091,6 +2093,7 @@ def build_final_team_context(final_teams, analyzed_students, trait_complement_li
                     "name": member.get("name"),
                     "role": get_reason_role_label(member.get("role_group") or get_role_group(member.get("role"))),
                     "top_skills": parse_reason_stack_names(member.get("stack_score", ""), limit=2),
+                    "response_reliability": member.get("response_reliability", "HIGH"),
                     "strength": normalize_reason_text(member.get("strength")),
                     "suggestion": normalize_reason_text(member.get("suggestion")),
                     "experience": normalize_reason_text(member.get("experience", [])),
@@ -2181,6 +2184,7 @@ def get_final_team_analysis_prompt_chain():
     - 기술 스택은 꼭 필요할 때만 1~2개 사용한다.
     - "역할이 고르게 배치되어", "협업 성향이 안정적인 팀", "시너지 극대화", "동시에 만족", "알고리즘", "점수 기준" 같은 일반적이거나 기계적인 표현은 쓰지 않는다.
     - matching_evidence에 없는 소통/협업 안정성은 새로 만들어 쓰지 않는다.
+    - member_profiles의 response_reliability가 LOW인 학생은 성향 점수를 강한 근거로 쓰지 말고, 기술 스택, 구현 경험, 희망 역할을 중심으로 설명한다.
     - 현재 팀원이 아닌 학생 이름은 절대 언급하지 않는다.
     """
 
@@ -2401,6 +2405,7 @@ def get_final_reason_cards_prompt_chain():
     - 현재 팀원이 아닌 학생 이름은 절대 언급하지 않는다.
     - "각 구성원의 소통, 책임감, 협업, 유연성 등 성격 성향이 고르게 분포되어", "협업 성향이 안정적인 팀" 같은 일반 템플릿 문장을 쓰지 않는다.
     - matching_evidence에 없는 협업 안정성, 소통 안정성, 책임감 안정성은 새로 만들어 쓰지 않는다.
+    - member_profiles의 response_reliability가 LOW인 학생은 성향 점수를 강한 배정 근거로 쓰지 않는다. 필요하면 "설문 응답 성향 정보는 참고 수준으로 활용하고 구현 경험과 희망 직군을 중심으로 배치했습니다."처럼 완곡하게 설명한다.
     - 숫자 점수는 되도록 쓰지 말고 "소통이 낮은 편", "책임감이 높은 편", "구현 경험이 풍부한 편"처럼 자연어로 표현한다.
     - reason은 reason_cards의 모든 description을 공백으로 이어 붙여 작성한다.
 
