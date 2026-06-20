@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import time
 from dotenv import load_dotenv
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", "..", ".env"), override=False)
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"), override=True)
@@ -29,12 +30,68 @@ from capteam_traits import ensure_trait_profile
 #클로드코드, codex한번 사서 써봐야할듯.
 #이름 말고 학번으로 주 식별자.
 #지금 매칭로직에서 score들이 되게 중요함 그래서 score들 점수를 잘 매겨야할듯. 상중하도 
-#객체를 계속만들어서 return하면 계속 객체 하나하나 마다 호출되서 한번호출하고 계속쓰는 방식으로 변경
+#객체를 계속만들어서 return하면 계속 객체 하나하나 마다 호출되서 한번호출하고 계속쓰는 방식으로 변경 객체 생성비용 줄임
 llm = ChatUpstage(
         model='solar-pro3',
         temperature=0,)
 def get_llm(): #모델 랜덤성이 좀 있길레 temperature=0으로 해줌
     return llm
+
+
+def is_rate_limit_error(error: Exception) -> bool:
+    error_text = str(error).lower()
+    status_code = getattr(error, "status_code", None)
+    return (
+        status_code == 429
+        or "ratelimiterror" in type(error).__name__.lower()
+        or "too_many_requests" in error_text
+        or "error code: 429" in error_text
+    )
+
+
+def invoke_analysis_with_retry(chain, payload: Dict[str, Any], student_name: str):
+    max_retries = int(os.getenv("ANALYSIS_LLM_MAX_RETRIES", "3"))
+    base_delay = float(os.getenv("ANALYSIS_LLM_RETRY_DELAY", "5"))
+
+    for attempt in range(max_retries + 1):
+        try:
+            return chain.invoke(payload)
+        except Exception as error:
+            if not is_rate_limit_error(error):
+                raise
+
+            if attempt >= max_retries:
+                print(
+                    f"{student_name} 분석 RateLimit 재시도 초과: {type(error).__name__}: {error}",
+                    flush=True,
+                )
+                raise
+
+            delay = base_delay * (2 ** attempt)
+            print(
+                f"{student_name} 분석 RateLimit 발생. {delay:.1f}초 후 재시도 "
+                f"({attempt + 1}/{max_retries})",
+                flush=True,
+            )
+            time.sleep(delay)
+
+
+def build_failed_analysis(student: Dict[str, Any], error: Exception) -> Dict[str, Any]:
+    role = student.get("role") or student.get("goal") or ""
+    failed_result = {
+        **student,
+        "name": student.get("name", ""),
+        "strength": "",
+        "weakness": "",
+        "reason": "학생 분석 중 API 요청 제한으로 분석을 완료하지 못했습니다.",
+        "stack_score": "",
+        "skill_level": "낮음",
+        "role": role,
+        "suggestion": "",
+        "analysis_status": "FAILED",
+        "analysis_error": f"{type(error).__name__}: {error}",
+    }
+    return ensure_preference_profile(ensure_trait_profile(failed_result, source=student))
 
 
 
@@ -423,14 +480,27 @@ def get_analyze_stu(students: Optional[List[Dict[str, Any]]] = None):
         print("="*55, flush=True)
         print(f"분석 시작: {student['name']}", flush=True)
 
-        response = chain.invoke({
+        request_payload = {
             "student_data": json.dumps(student, ensure_ascii=False, indent=2), #prompt에서 받아야할 student_data 넣어줌
             "skill_evidence": json.dumps(make_skill_evidence(student), ensure_ascii=False, indent=2),
             "input": "이 학생의 실력을 분석해줘."  #사용자 input 입력
-        })
+        }
+
+        try:
+            response = invoke_analysis_with_retry(chain, request_payload, student["name"])
+        except Exception as error:
+            if not is_rate_limit_error(error):
+                raise
+
+            failed_response = build_failed_analysis(student, error)
+            print(f"분석 실패 상태로 저장: {student['name']}")
+            print(failed_response)
+            results.append(failed_response)
+            continue
 
         print(f"이름: {student['name']}")
         normalized_response = normalize_analysis(response, student)
+        normalized_response["analysis_status"] = "SUCCESS"
         print(normalized_response)
         results.append(normalized_response)
         #리스트만들어서 답변나오면 그리스트 안에 들어가는 형식으로 이 만든걸 matching하는 llm에게 넘김.
