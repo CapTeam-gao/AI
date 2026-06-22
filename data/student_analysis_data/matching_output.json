@@ -1,1404 +1,211 @@
 {
 "analyzed_students": [
 {
-"name": "서강준",
+"name": "장준민",
+"role": "FRONTEND",
+"grade": "GRADE_2",
+"stack": [
+"React",
+"JavaScript",
+"Zustand",
+"Axios",
+"CSS Modules"
+],
+"reason": "학생은 React를 사용해 관리자 대시보드 화면을 구현하고, API 응답에 따라 UI를 조건부 렌더링했으며, Axios로 공지 목록 조회 API를 연결하고 Loading/Error/Empty 상태를 구현했습니다. 또한 CSS Modules로 반응형 카드 UI를 구성했습니다. 이러한 경험은 여러 기능이 결합된 프론트엔드 프로젝트 구현으로, 상태 관리, API 연동, 반응형 스타일링 등 실전 요소가 포함되어 있습니다. 그러나 아키텍처 설계, 성능 개선, 운영/장애 대응, 복잡한 문제 해결 등 고급 구현 근거는 제시되지 않았습니다. 따라서 skill_level은 '보통'으로 판정합니다.",
+"user_id": null,
+"planning": 3.5,
+"strength": "API 연동, 상태 관리, 반응형 UI 구현 등 실전 프론트엔드 개발 경험이 풍부하며, 여러 기능을 결합한 프로젝트를 독립적으로 구현할 수 있는 능력이 있습니다.",
+"weakness": "아키텍처 설계, 성능 최적화, 운영/장애 대응 등 고급 개발 경험이 부족합니다. 또한 협업 경험이 collaboration 4.5로 높지만, 고급 프로젝트에서의 리더십이나 설계 주도 경험은 아직 제한적입니다.",
+"experience": [
+"React로 관리자 대시보드 화면을 구현하고 API 응답값에 따라 팀 생성 전/후 UI가 바뀌도록 조건부 렌더링을 적용했습니다.",
+"Axios를 사용해 공지 목록 조회 API를 연결하고 Loading, Error, Empty 상태를 나누어 화면에 표시했습니다.",
+"CSS Modules로 공통 카드 UI를 구성하고 반응형 화면에서도 버튼과 텍스트가 깨지지 않도록 스타일을 조정했습니다."
+],
+"leadership": 4.0,
+"suggestion": "백엔드 API 설계와 데이터 흐름을 잘 이해하는 프론트엔드 개발자와 협업하면 시너지가 큽니다. 특히 상태 관리나 복잡한 UI 로직을 함께 구현할 수 있는 팀원을 추천합니다.",
+"flexibility": 3.5,
+"skill_level": "보통",
+"stack_score": "React: 5점\nJavaScript: 4점\nZustand: 3점\nAxios: 4점\nCSS Modules: 4점",
+"wants_leader": true,
+"collaboration": 4.5,
+"communication": 4.5,
+"implementation": 4.5,
+"problemSolving": 4.0,
+"responsibility": 4.0,
+"analysis_status": "SUCCESS",
+"learningAbility": 4.0,
+"matching_traits": {
+"trait_average": 3.8,
+"leader_score": 3.7,
+"low_traits": [],
+"high_traits": [
+{
+"trait": "communication",
+"label": "소통",
+"score": 4
+},
+{
+"trait": "responsibility",
+"label": "책임감",
+"score": 4
+},
+{
+"trait": "collaboration",
+"label": "협업",
+"score": 4
+},
+{
+"trait": "emotionalStability",
+"label": "감정 안정성",
+"score": 4
+},
+{
+"trait": "leadership",
+"label": "리더십",
+"score": 4
+},
+{
+"trait": "problemSolving",
+"label": "문제 해결력",
+"score": 4
+},
+{
+"trait": "implementation",
+"label": "구현 실행력",
+"score": 4
+},
+{
+"trait": "learningAbility",
+"label": "학습 성장성",
+"score": 4
+}
+],
+"defaulted_traits": [],
+"response_reliability": "HIGH",
+"response_reliability_weight": 1.0
+},
+"preferred_members": [],
+"development_scores": {
+"leadership": 4,
+"problemSolving": 4,
+"implementation": 4,
+"learningAbility": 4,
+"planning": 3
+},
+"emotionalStability": 4.0,
+"personality_scores": {
+"communication": 4,
+"responsibility": 4,
+"collaboration": 4,
+"flexibility": 3,
+"emotionalStability": 4
+},
+"development_summary": {
+"strengths": [
+{
+"trait": "leadership",
+"label": "리더십",
+"score": 4
+},
+{
+"trait": "problemSolving",
+"label": "문제 해결력",
+"score": 4
+},
+{
+"trait": "implementation",
+"label": "구현 실행력",
+"score": 4
+},
+{
+"trait": "learningAbility",
+"label": "학습 성장성",
+"score": 4
+}
+],
+"risks": [],
+"summary": "강점: 리더십, 문제 해결력, 구현 실행력, 학습 성장성 / 리스크: 낮은 리스크 성향은 없습니다."
+},
+"personality_summary": {
+"strengths": [
+{
+"trait": "communication",
+"label": "소통",
+"score": 4
+},
+{
+"trait": "responsibility",
+"label": "책임감",
+"score": 4
+},
+{
+"trait": "collaboration",
+"label": "협업",
+"score": 4
+},
+{
+"trait": "emotionalStability",
+"label": "감정 안정성",
+"score": 4
+}
+],
+"risks": [],
+"summary": "강점: 소통, 책임감, 협업, 감정 안정성 / 리스크: 낮은 리스크 성향은 없습니다."
+},
+"matching_preferences": {
+"preferred_members": [],
+"wants_leader": true,
+"ignored_preferences": []
+},
+"response_reliability": "HIGH"
+},
+{
+"name": "위재성",
 "role": "BACKEND",
 "grade": "GRADE_2",
 "stack": [
+"Java",
 "Spring Boot",
 "JPA",
 "MySQL",
 "JWT"
 ],
-"reason": "학생은 Spring Boot와 JPA를 활용해 회원가입·로그인·JWT 인증 API를 구현하고, 팀·사용자·신청 내역의 연관관계를 설계해 N+1 문제를 fetch join으로 해결한 경험이 있습니다. 이는 여러 기능이 결합된 프로젝트를 구조적으로 구현하고 주요 성능 문제를 해결한 사례로, 고급 구현 근거가 명확합니다. 따라서 skill_level은 '보통'으로 판정합니다.",
-"user_id": null,
-"planning": 3.8,
-"strength": "Spring Boot와 JPA를 활용한 인증 및 데이터 구조 설계, N+1 문제 해결을 위한 fetch join 적용 등 고급 구현 경험이 있음",
-"weakness": "아키텍처 설계나 운영/장애 대응, 복잡한 문제 해결 경험이 부족하여 '높음' 수준은 아님. 또한 협업 경험이 collaboration 4.0으로 높은 편이지만, 실제 팀 프로젝트에서의 리더십 발휘는 아직 제한적임.",
-"experience": [
-"캡스톤 예비 프로젝트에서 Spring Boot로 회원가입, 로그인, JWT 인증 API를 구현하고 예외 응답 형식을 통일했습니다.",
-"JPA 연관관계를 이용해 팀, 사용자, 신청 내역을 저장하는 구조를 만들고 N+1 문제를 줄이기 위해 fetch join을 적용했습니다."
-],
-"leadership": 4.1,
-"suggestion": "프론트엔드 개발자와 협업하여 API 설계 및 인증 로직을 공유하고, 데이터베이스 최적화를 담당할 수 있는 백엔드 개발자와 매칭하면 시너지가 큽니다.",
-"flexibility": 3.9,
-"skill_level": "보통",
-"stack_score": "Spring Boot: 7점\nJPA: 7점\nMySQL: 5점\nJWT: 6점",
-"wants_leader": true,
-"collaboration": 4.0,
-"communication": 4.1,
-"implementation": 4.6,
-"problemSolving": 4.4,
-"responsibility": 4.3,
-"learningAbility": 4.2,
-"matching_traits": {
-"trait_average": 3.7,
-"leader_score": 3.7,
-"low_traits": [],
-"high_traits": [
-{
-"trait": "communication",
-"label": "소통",
-"score": 4
-},
-{
-"trait": "responsibility",
-"label": "책임감",
-"score": 4
-},
-{
-"trait": "collaboration",
-"label": "협업",
-"score": 4
-},
-{
-"trait": "leadership",
-"label": "리더십",
-"score": 4
-},
-{
-"trait": "problemSolving",
-"label": "문제 해결력",
-"score": 4
-},
-{
-"trait": "implementation",
-"label": "구현 실행력",
-"score": 4
-},
-{
-"trait": "learningAbility",
-"label": "학습 성장성",
-"score": 4
-}
-],
-"defaulted_traits": []
-},
-"preferred_members": [],
-"development_scores": {
-"leadership": 4,
-"problemSolving": 4,
-"implementation": 4,
-"learningAbility": 4,
-"planning": 3
-},
-"emotionalStability": 3.7,
-"personality_scores": {
-"communication": 4,
-"responsibility": 4,
-"collaboration": 4,
-"flexibility": 3,
-"emotionalStability": 3
-},
-"development_summary": {
-"strengths": [
-{
-"trait": "leadership",
-"label": "리더십",
-"score": 4
-},
-{
-"trait": "problemSolving",
-"label": "문제 해결력",
-"score": 4
-},
-{
-"trait": "implementation",
-"label": "구현 실행력",
-"score": 4
-},
-{
-"trait": "learningAbility",
-"label": "학습 성장성",
-"score": 4
-}
-],
-"risks": [],
-"summary": "강점: 리더십, 문제 해결력, 구현 실행력, 학습 성장성 / 리스크: 낮은 리스크 성향은 없습니다."
-},
-"personality_summary": {
-"strengths": [
-{
-"trait": "communication",
-"label": "소통",
-"score": 4
-},
-{
-"trait": "responsibility",
-"label": "책임감",
-"score": 4
-},
-{
-"trait": "collaboration",
-"label": "협업",
-"score": 4
-}
-],
-"risks": [],
-"summary": "강점: 소통, 책임감, 협업 / 리스크: 낮은 리스크 성향은 없습니다."
-},
-"matching_preferences": {
-"preferred_members": [],
-"wants_leader": true,
-"ignored_preferences": [
-"stu2302 선호는 분석 데이터에 없는 학생이라 제외했습니다."
-]
-}
-},
-{
-"name": "한유림",
-"role": "FRONTEND",
-"grade": "GRADE_2",
-"stack": [
-"React",
-"TypeScript",
-"TanStack Query",
-"CSS Modules"
-],
-"reason": "학생은 React와 TypeScript를 사용해 관리자 대시보드 화면을 구현하고 TanStack Query로 목록 조회, 검색, 상태 변경 후 캐시 갱신 흐름을 구현했으며, 폼 검증, 모달, 페이지네이션 컴포넌트를 분리해 여러 화면에서 재사용 가능하도록 정리한 경험이 있습니다. 이는 여러 기능이 결합된 프로젝트를 구조적으로 구현하고 주요 문제를 해결한 수준에 해당합니다. 또한 협업 점수가 3.8로 1 이상이며, advanced_evidence_count가 0이지만 구현 깊이가 충분히 높아 보통 수준으로 판단됩니다.",
-"user_id": null,
-"planning": 3.7,
-"strength": "관리자 대시보드와 같은 복합 UI를 React와 TypeScript로 구조화하고, TanStack Query를 활용해 데이터 흐름을 관리하며, 재사용 가능한 UI 컴포넌트를 설계한 경험이 있습니다.",
-"weakness": "고급 아키텍처 설계나 성능 최적화, 운영/장애 대응 경험이 부족하며, TanStack Query를 활용한 고급 캐싱 전략이나 대규모 상태 관리(예: Redux, Zustand 등) 경험은 제한적입니다. 또한 리더십 점수가 낮아 팀 리딩 역할은 어려울 수 있습니다.",
-"experience": [
-"React와 TypeScript로 관리자 대시보드 화면을 만들고 TanStack Query로 목록 조회, 검색, 상태 변경 후 캐시 갱신 흐름을 구현했습니다.",
-"폼 검증, 모달, 페이지네이션 컴포넌트를 분리해 여러 화면에서 재사용할 수 있도록 정리한 경험이 있습니다."
-],
-"leadership": 3.2,
-"suggestion": "백엔드 API와 연동된 복잡한 프론트엔드 로직을 구현할 수 있는 학생과 협업하면 시너지가 클 것입니다. 특히 상태 관리와 데이터 캐싱에 강점을 가진 백엔드 개발자나 풀스택 개발자와 함께하면 좋습니다.",
-"flexibility": 4.0,
-"skill_level": "보통",
-"stack_score": "React: 7점\nTypeScript: 7점\nTanStack Query: 6점\nCSS Modules: 4점",
-"wants_leader": false,
-"collaboration": 3.8,
-"communication": 4.2,
-"implementation": 4.3,
-"problemSolving": 4.1,
-"responsibility": 3.9,
-"learningAbility": 4.0,
-"matching_traits": {
-"trait_average": 3.5,
-"leader_score": 3.3,
-"low_traits": [],
-"high_traits": [
-{
-"trait": "communication",
-"label": "소통",
-"score": 4
-},
-{
-"trait": "flexibility",
-"label": "유연성",
-"score": 4
-},
-{
-"trait": "problemSolving",
-"label": "문제 해결력",
-"score": 4
-},
-{
-"trait": "implementation",
-"label": "구현 실행력",
-"score": 4
-},
-{
-"trait": "learningAbility",
-"label": "학습 성장성",
-"score": 4
-}
-],
-"defaulted_traits": []
-},
-"preferred_members": [],
-"development_scores": {
-"leadership": 3,
-"problemSolving": 4,
-"implementation": 4,
-"learningAbility": 4,
-"planning": 3
-},
-"emotionalStability": 3.6,
-"personality_scores": {
-"communication": 4,
-"responsibility": 3,
-"collaboration": 3,
-"flexibility": 4,
-"emotionalStability": 3
-},
-"development_summary": {
-"strengths": [
-{
-"trait": "problemSolving",
-"label": "문제 해결력",
-"score": 4
-},
-{
-"trait": "implementation",
-"label": "구현 실행력",
-"score": 4
-},
-{
-"trait": "learningAbility",
-"label": "학습 성장성",
-"score": 4
-}
-],
-"risks": [],
-"summary": "강점: 문제 해결력, 구현 실행력, 학습 성장성 / 리스크: 낮은 리스크 성향은 없습니다."
-},
-"personality_summary": {
-"strengths": [
-{
-"trait": "communication",
-"label": "소통",
-"score": 4
-},
-{
-"trait": "flexibility",
-"label": "유연성",
-"score": 4
-}
-],
-"risks": [],
-"summary": "강점: 소통, 유연성 / 리스크: 낮은 리스크 성향은 없습니다."
-},
-"matching_preferences": {
-"preferred_members": [],
-"wants_leader": false,
-"ignored_preferences": []
-}
-},
-{
-"name": "오태민",
-"role": "AI",
-"grade": "GRADE_2",
-"stack": [
-"Python",
-"Pandas",
-"scikit-learn",
-"FastAPI"
-],
-"reason": "학생은 Pandas를 활용해 설문 CSV 정제, 결측값 처리, 범주형 인코딩, 군집 분석 결과를 FastAPI 엔드포인트로 제공하는 경험을 가지고 있습니다. 이는 데이터 전처리와 간단한 머신러닝 분석, API 서버 구축까지 포함한 작은 프로젝트 수준의 구현입니다. 그러나 아키텍처 설계, 성능 개선, 운영/장애 대응, 복잡한 문제 해결 등 고급 근거가 없으며, '간단한'이라는 표현이 핵심 경험에 포함되어 있습니다. 또한 advanced_evidence_count가 0으로, 고급 구현 경험이 부족합니다. 따라서 skill_level은 '보통'으로 판정합니다.",
-"user_id": null,
-"planning": 3.5,
-"strength": "데이터 전처리와 간단한 머신러닝 분석을 직접 구현하고, 이를 API로 제공하는 엔드투엔드 구현 능력",
-"weakness": "고급 아키텍처 설계, 성능 최적화, 운영/장애 대응 경험이 부족하며, 협업 경험이 collaboration 3.7로 보통 수준이지만 고급 프로젝트에서의 협업 경험은 제한적입니다.",
-"experience": [
-"Pandas로 설문 CSV를 정제하고 결측값 처리, 범주형 응답 인코딩, 간단한 군집 분석 결과를 FastAPI 엔드포인트로 제공했습니다.",
-"모델 성능을 정확도만 보지 않고 혼동 행렬과 feature importance로 설명하는 실험 노트를 작성한 경험이 있습니다."
-],
-"leadership": 3.4,
-"suggestion": "데이터 파이프라인 구축, 모델 서빙, 백엔드 API 개발 경험이 있는 학생과 협업하면 시너지가 클 것입니다. 특히 FastAPI와 scikit-learn을 활용한 모델 배포 경험이 있는 학생을 추천합니다.",
-"flexibility": 4.1,
-"skill_level": "보통",
-"stack_score": "Python: 5점\nPandas: 5점\nscikit-learn: 4점\nFastAPI: 4점",
-"wants_leader": false,
-"collaboration": 3.7,
-"communication": 3.8,
-"implementation": 4.1,
-"problemSolving": 4.3,
-"responsibility": 3.8,
-"learningAbility": 4.5,
-"matching_traits": {
-"trait_average": 3.4,
-"leader_score": 3.3,
-"low_traits": [],
-"high_traits": [
-{
-"trait": "flexibility",
-"label": "유연성",
-"score": 4
-},
-{
-"trait": "problemSolving",
-"label": "문제 해결력",
-"score": 4
-},
-{
-"trait": "implementation",
-"label": "구현 실행력",
-"score": 4
-},
-{
-"trait": "learningAbility",
-"label": "학습 성장성",
-"score": 4
-}
-],
-"defaulted_traits": []
-},
-"preferred_members": [],
-"development_scores": {
-"leadership": 3,
-"problemSolving": 4,
-"implementation": 4,
-"learningAbility": 4,
-"planning": 3
-},
-"emotionalStability": 3.5,
-"personality_scores": {
-"communication": 3,
-"responsibility": 3,
-"collaboration": 3,
-"flexibility": 4,
-"emotionalStability": 3
-},
-"development_summary": {
-"strengths": [
-{
-"trait": "problemSolving",
-"label": "문제 해결력",
-"score": 4
-},
-{
-"trait": "implementation",
-"label": "구현 실행력",
-"score": 4
-},
-{
-"trait": "learningAbility",
-"label": "학습 성장성",
-"score": 4
-}
-],
-"risks": [],
-"summary": "강점: 문제 해결력, 구현 실행력, 학습 성장성 / 리스크: 낮은 리스크 성향은 없습니다."
-},
-"personality_summary": {
-"strengths": [
-{
-"trait": "flexibility",
-"label": "유연성",
-"score": 4
-}
-],
-"risks": [],
-"summary": "강점: 유연성 / 리스크: 낮은 리스크 성향은 없습니다."
-},
-"matching_preferences": {
-"preferred_members": [],
-"wants_leader": false,
-"ignored_preferences": [
-"stu2308 선호는 분석 데이터에 없는 학생이라 제외했습니다."
-]
-}
-},
-{
-"name": "이다솜",
-"role": "DESIGN",
-"grade": "GRADE_2",
-"stack": [
-"Figma",
-"User Flow",
-"Design System",
-"Prototyping"
-],
-"reason": "학생은 DESIGN 역할을 가지고 있으며, Figma를 활용한 사용자 플로우 설계 및 프로토타이핑 경험이 있습니다. 경험 내용에는 사용자 가입부터 팀 추천 확인까지의 플로우를 와이어프레임으로 설계하고, 개발자가 구현하기 쉬운 컴포넌트 단위로 화면을 정리한 점, 그리고 사용자 테스트 피드백을 바탕으로 버튼 위치, 필터 구조, 빈 상태 문구를 개선해 화면 이해도를 높인 점이 포함되어 있습니다. 이는 디자인 시스템 구축과 사용자 중심 개선 경험을 보여주며, 협업 점수도 4.2로 높은 편입니다. 따라서 기술 스택은 디자인 도구 중심이며, 실제 구현보다는 설계 및 개선 역량이 강점입니다.",
-"user_id": null,
-"planning": 4.4,
-"strength": "사용자 중심 디자인 설계 및 개선 역량, 컴포넌트 단위 구조화 능력, 높은 협업 점수",
-"weakness": "구현(implementation) 경험이 부족하여 실제 코드 작성이나 배포, 성능 최적화 등의 기술적 깊이는 낮음. 고급 아키텍처 설계나 복잡한 문제 해결 경험은 제한적임.",
-"experience": [
-"Figma로 사용자 가입부터 팀 추천 확인까지의 플로우를 와이어프레임으로 설계하고, 개발자가 구현하기 쉬운 컴포넌트 단위로 화면을 정리했습니다.",
-"사용자 테스트 피드백을 바탕으로 버튼 위치, 필터 구조, 빈 상태 문구를 개선해 화면 이해도를 높인 경험이 있습니다."
-],
-"leadership": 3.6,
-"suggestion": "프론트엔드 개발자와 협업하여 디자인 시스템을 구현하고, 백엔드 개발자와 API 연동 시 UI/UX 관점에서 피드백을 제공할 수 있는 역할. Figma와 디자인 시스템을 깊이 있게 활용할 수 있는 팀원과 함께하면 시너지가 큽니다.",
-"flexibility": 4.5,
-"skill_level": "보통",
-"stack_score": "Figma: 5점\nUser Flow: 4점\nDesign System: 5점\nPrototyping: 4점",
-"wants_leader": false,
-"collaboration": 4.2,
-"communication": 4.3,
-"implementation": 3.8,
-"problemSolving": 3.7,
-"responsibility": 4.0,
-"learningAbility": 3.9,
-"matching_traits": {
-"trait_average": 3.5,
-"leader_score": 3.3,
-"low_traits": [],
-"high_traits": [
-{
-"trait": "communication",
-"label": "소통",
-"score": 4
-},
-{
-"trait": "responsibility",
-"label": "책임감",
-"score": 4
-},
-{
-"trait": "collaboration",
-"label": "협업",
-"score": 4
-},
-{
-"trait": "flexibility",
-"label": "유연성",
-"score": 4
-},
-{
-"trait": "planning",
-"label": "기획 정리력",
-"score": 4
-}
-],
-"defaulted_traits": []
-},
-"preferred_members": [],
-"development_scores": {
-"leadership": 3,
-"problemSolving": 3,
-"implementation": 3,
-"learningAbility": 3,
-"planning": 4
-},
-"emotionalStability": 3.8,
-"personality_scores": {
-"communication": 4,
-"responsibility": 4,
-"collaboration": 4,
-"flexibility": 4,
-"emotionalStability": 3
-},
-"development_summary": {
-"strengths": [
-{
-"trait": "planning",
-"label": "기획 정리력",
-"score": 4
-}
-],
-"risks": [],
-"summary": "강점: 기획 정리력 / 리스크: 낮은 리스크 성향은 없습니다."
-},
-"personality_summary": {
-"strengths": [
-{
-"trait": "communication",
-"label": "소통",
-"score": 4
-},
-{
-"trait": "responsibility",
-"label": "책임감",
-"score": 4
-},
-{
-"trait": "collaboration",
-"label": "협업",
-"score": 4
-},
-{
-"trait": "flexibility",
-"label": "유연성",
-"score": 4
-}
-],
-"risks": [],
-"summary": "강점: 소통, 책임감, 협업, 유연성 / 리스크: 낮은 리스크 성향은 없습니다."
-},
-"matching_preferences": {
-"preferred_members": [],
-"wants_leader": false,
-"ignored_preferences": []
-}
-},
-{
-"name": "문태준",
-"role": "APP",
-"grade": "GRADE_2",
-"stack": [
-"Flutter",
-"Dart",
-"Firebase",
-"REST API"
-],
-"reason": "Flutter와 Firebase를 활용한 일정 관리 앱 구현 경험이 있으나, 아키텍처 설계, 성능 개선, 운영/장애 대응, 복잡한 문제 해결 등 고급 근거가 부족하고, advanced_evidence_count가 0으로 고급 구현 경험이 제한적임. 따라서 '보통' 수준으로 평가함.",
-"user_id": null,
-"planning": 3.6,
-"strength": "Flutter와 Firebase를 활용한 실제 앱 구현 경험, Provider 기반 상태 관리 및 네트워크 오류 처리 등 실전 구현 능력",
-"weakness": "고급 아키텍처 설계, 성능 개선, 운영/장애 대응 경험이 부족하며, 복잡한 문제 해결 및 테스트 자동화 등 고급 구현 근거가 미흡함",
-"experience": [
-"Flutter로 일정 관리 앱을 만들며 Firebase Auth, Firestore 저장, REST API 연동 화면을 구현했습니다.",
-"Provider 기반 상태 관리를 적용해 로그인 상태와 서버 응답 로딩 상태를 분리하고, 네트워크 오류 화면을 처리했습니다."
-],
-"leadership": 3.9,
-"suggestion": "Firebase와 REST API 연동 경험이 있는 백엔드 개발자 또는 상태 관리와 UI 최적화에 강한 프론트엔드 개발자와 협업하면 시너지가 클 것",
-"flexibility": 4.0,
-"skill_level": "보통",
-"stack_score": "Flutter: 6점\nDart: 5점\nFirebase: 6점\nREST API: 5점",
-"wants_leader": false,
-"collaboration": 3.9,
-"communication": 3.7,
-"implementation": 4.0,
-"problemSolving": 4.0,
-"responsibility": 4.1,
-"learningAbility": 4.1,
-"matching_traits": {
-"trait_average": 3.5,
-"leader_score": 3.3,
-"low_traits": [],
-"high_traits": [
-{
-"trait": "responsibility",
-"label": "책임감",
-"score": 4
-},
-{
-"trait": "flexibility",
-"label": "유연성",
-"score": 4
-},
-{
-"trait": "problemSolving",
-"label": "문제 해결력",
-"score": 4
-},
-{
-"trait": "implementation",
-"label": "구현 실행력",
-"score": 4
-},
-{
-"trait": "learningAbility",
-"label": "학습 성장성",
-"score": 4
-}
-],
-"defaulted_traits": []
-},
-"preferred_members": [],
-"development_scores": {
-"leadership": 3,
-"problemSolving": 4,
-"implementation": 4,
-"learningAbility": 4,
-"planning": 3
-},
-"emotionalStability": 3.6,
-"personality_scores": {
-"communication": 3,
-"responsibility": 4,
-"collaboration": 3,
-"flexibility": 4,
-"emotionalStability": 3
-},
-"development_summary": {
-"strengths": [
-{
-"trait": "problemSolving",
-"label": "문제 해결력",
-"score": 4
-},
-{
-"trait": "implementation",
-"label": "구현 실행력",
-"score": 4
-},
-{
-"trait": "learningAbility",
-"label": "학습 성장성",
-"score": 4
-}
-],
-"risks": [],
-"summary": "강점: 문제 해결력, 구현 실행력, 학습 성장성 / 리스크: 낮은 리스크 성향은 없습니다."
-},
-"personality_summary": {
-"strengths": [
-{
-"trait": "responsibility",
-"label": "책임감",
-"score": 4
-},
-{
-"trait": "flexibility",
-"label": "유연성",
-"score": 4
-}
-],
-"risks": [],
-"summary": "강점: 책임감, 유연성 / 리스크: 낮은 리스크 성향은 없습니다."
-},
-"matching_preferences": {
-"preferred_members": [],
-"wants_leader": false,
-"ignored_preferences": [
-"stu2310 선호는 분석 데이터에 없는 학생이라 제외했습니다."
-]
-}
-},
-{
-"name": "권서준",
-"role": "DEVOPS",
-"grade": "GRADE_2",
-"stack": [
-"Docker",
-"GitHub Actions",
-"Nginx",
-"AWS EC2"
-],
-"reason": "권서준은 Docker Compose를 활용해 Spring Boot, MySQL, Nginx를 포함한 개발 환경을 구성하고, GitHub Actions를 통해 빌드 및 배포 자동화를 구현했으며, 환경변수 분리, 로그 확인, 포트 충돌 해결 등 실전 운영 경험을 보유하고 있습니다. 이는 단순한 튜토리얼 수준을 넘어 여러 기술이 결합된 프로젝트를 독립적으로 설계·구현·배포한 사례로, 아키텍처 설계, 성능 개선, 운영/장애 대응, 복잡한 문제 해결 근거가 명확합니다. 따라서 skill_level은 '높음'으로 판정합니다.\n\n최종 판정 보정: 입력 데이터 기준으로 '높음'이 아니라 '보통'으로 제한한다. 높음 판정에는 아키텍처, 운영, 성능 개선, 복잡한 문제 해결 같은 고급 근거가 명확해야 한다.",
-"user_id": null,
-"planning": 3.4,
-"strength": "CI/CD 파이프라인 설계 및 자동화, 다중 서비스 환경 구성, 실전 운영 문제 해결 능력",
-"weakness": "고급 보안 설정, 쿠버네티스 기반 오케스트레이션, 모니터링/로깅 시스템 설계 경험이 부족합니다. 또한, AWS 서비스 중 EC2 외의 서비스(예: RDS, S3, Lambda) 활용 경험이 제한적입니다.",
-"experience": [
-"Docker Compose로 Spring Boot, MySQL, Nginx 개발 환경을 구성하고 GitHub Actions에서 빌드 후 EC2 배포까지 자동화했습니다.",
-"환경변수 분리, 로그 확인, 포트 충돌 해결 경험이 있어 팀 프로젝트 초기 개발 환경 세팅을 맡을 수 있습니다."
-],
-"leadership": 3.8,
-"suggestion": "백엔드 개발자, 데이터 엔지니어, 프론트엔드 개발자와 협업하여 인프라 구축 및 배포 자동화를 담당할 수 있습니다. 특히 Spring Boot 기반 백엔드 팀과 함께 마이크로서비스 배포 파이프라인을 구축하면 시너지가 큽니다.",
-"flexibility": 3.7,
-"skill_level": "보통",
-"stack_score": "Docker: 7점\nGitHub Actions: 7점\nNginx: 7점\nAWS EC2: 7점",
-"wants_leader": true,
-"collaboration": 3.6,
-"communication": 3.8,
-"implementation": 4.5,
-"problemSolving": 4.2,
-"responsibility": 4.2,
-"learningAbility": 4.0,
-"matching_traits": {
-"trait_average": 3.4,
-"leader_score": 3.3,
-"low_traits": [],
-"high_traits": [
-{
-"trait": "responsibility",
-"label": "책임감",
-"score": 4
-},
-{
-"trait": "problemSolving",
-"label": "문제 해결력",
-"score": 4
-},
-{
-"trait": "implementation",
-"label": "구현 실행력",
-"score": 4
-},
-{
-"trait": "learningAbility",
-"label": "학습 성장성",
-"score": 4
-}
-],
-"defaulted_traits": []
-},
-"preferred_members": [],
-"development_scores": {
-"leadership": 3,
-"problemSolving": 4,
-"implementation": 4,
-"learningAbility": 4,
-"planning": 3
-},
-"emotionalStability": 3.4,
-"personality_scores": {
-"communication": 3,
-"responsibility": 4,
-"collaboration": 3,
-"flexibility": 3,
-"emotionalStability": 3
-},
-"development_summary": {
-"strengths": [
-{
-"trait": "problemSolving",
-"label": "문제 해결력",
-"score": 4
-},
-{
-"trait": "implementation",
-"label": "구현 실행력",
-"score": 4
-},
-{
-"trait": "learningAbility",
-"label": "학습 성장성",
-"score": 4
-}
-],
-"risks": [],
-"summary": "강점: 문제 해결력, 구현 실행력, 학습 성장성 / 리스크: 낮은 리스크 성향은 없습니다."
-},
-"personality_summary": {
-"strengths": [
-{
-"trait": "responsibility",
-"label": "책임감",
-"score": 4
-}
-],
-"risks": [],
-"summary": "강점: 책임감 / 리스크: 낮은 리스크 성향은 없습니다."
-},
-"matching_preferences": {
-"preferred_members": [],
-"wants_leader": true,
-"ignored_preferences": []
-}
-},
-{
-"name": "정예나",
-"role": "FRONTEND",
-"grade": "GRADE_2",
-"stack": [
-"Vue",
-"Pinia",
-"Vite",
-"Chart.js"
-],
-"reason": "정예나는 Vue와 Pinia를 활용해 통계 차트 화면을 구현하고, 사용자 입력 상태와 API 응답 상태를 분리해 화면 깜빡임을 줄이는 등 상태 관리와 데이터 갱신 로직을 직접 구현한 경험이 있습니다. 또한 검색 조건을 URL query로 유지하는 등 프론트엔드에서 사용자 경험을 고려한 설계 요소가 포함되어 있습니다. 이러한 경험은 단순 클론코딩이나 튜토리얼 수준을 넘어, 여러 기능이 결합된 프로젝트를 구조적으로 구현하고 주요 문제를 해결한 수준에 해당합니다. 따라서 skill_level은 '보통'으로 판정합니다.",
-"user_id": null,
-"planning": 3.8,
-"strength": "Vue와 Pinia를 활용한 상태 관리 및 데이터 갱신 로직 구현 능력, 사용자 입력과 API 응답 상태를 분리해 화면 깜빡임을 줄이는 설계 경험",
-"weakness": "고급 아키텍처 설계나 성능 최적화, 운영/장애 대응 경험이 부족하며, Vite는 주로 빌드 도구 사용 수준에 머물러 있어 실제 프로젝트에서의 깊이 있는 활용 경험이 제한적임",
-"experience": [
-"Vue와 Pinia로 통계 차트 화면을 구현하고 Chart.js 데이터를 필터 조건에 따라 갱신하는 기능을 만들었습니다.",
-"사용자 입력 상태와 API 응답 상태를 분리해 화면 깜빡임을 줄이고, 검색 조건을 URL query로 유지한 경험이 있습니다."
-],
-"leadership": 3.3,
-"suggestion": "백엔드 API와 연동된 복잡한 프론트엔드 프로젝트를 담당하는 역할, 특히 상태 관리와 UI/UX 최적화가 필요한 모듈 개발에 적합",
-"flexibility": 4.3,
-"skill_level": "보통",
-"stack_score": "Vue: 5점\nPinia: 5점\nVite: 2점\nChart.js: 4점",
-"wants_leader": false,
-"collaboration": 4.1,
-"communication": 4.4,
-"implementation": 3.9,
-"problemSolving": 4.0,
-"responsibility": 4.0,
-"learningAbility": 4.2,
-"matching_traits": {
-"trait_average": 3.6,
-"leader_score": 3.3,
-"low_traits": [],
-"high_traits": [
-{
-"trait": "communication",
-"label": "소통",
-"score": 4
-},
-{
-"trait": "responsibility",
-"label": "책임감",
-"score": 4
-},
-{
-"trait": "collaboration",
-"label": "협업",
-"score": 4
-},
-{
-"trait": "flexibility",
-"label": "유연성",
-"score": 4
-},
-{
-"trait": "problemSolving",
-"label": "문제 해결력",
-"score": 4
-},
-{
-"trait": "learningAbility",
-"label": "학습 성장성",
-"score": 4
-}
-],
-"defaulted_traits": []
-},
-"preferred_members": [],
-"development_scores": {
-"leadership": 3,
-"problemSolving": 4,
-"implementation": 3,
-"learningAbility": 4,
-"planning": 3
-},
-"emotionalStability": 3.9,
-"personality_scores": {
-"communication": 4,
-"responsibility": 4,
-"collaboration": 4,
-"flexibility": 4,
-"emotionalStability": 3
-},
-"development_summary": {
-"strengths": [
-{
-"trait": "problemSolving",
-"label": "문제 해결력",
-"score": 4
-},
-{
-"trait": "learningAbility",
-"label": "학습 성장성",
-"score": 4
-}
-],
-"risks": [],
-"summary": "강점: 문제 해결력, 학습 성장성 / 리스크: 낮은 리스크 성향은 없습니다."
-},
-"personality_summary": {
-"strengths": [
-{
-"trait": "communication",
-"label": "소통",
-"score": 4
-},
-{
-"trait": "responsibility",
-"label": "책임감",
-"score": 4
-},
-{
-"trait": "collaboration",
-"label": "협업",
-"score": 4
-},
-{
-"trait": "flexibility",
-"label": "유연성",
-"score": 4
-}
-],
-"risks": [],
-"summary": "강점: 소통, 책임감, 협업, 유연성 / 리스크: 낮은 리스크 성향은 없습니다."
-},
-"matching_preferences": {
-"preferred_members": [],
-"wants_leader": false,
-"ignored_preferences": []
-}
-},
-{
-"name": "신우진",
-"role": "AI",
-"grade": "GRADE_2",
-"stack": [
-"PyTorch",
-"OpenCV",
-"NumPy",
-"FastAPI"
-],
-"reason": "학생은 PyTorch로 이미지 분류 모델을 학습하고 OpenCV 전처리, 데이터 증강, FastAPI 기반 추론 API를 연결한 경험을 가지고 있습니다. 이는 여러 기술 스택을 활용한 프로젝트 구현으로, 단순한 클론코딩이나 튜토리얼 수준을 넘어 실제 모델 학습, 전처리, API 설계까지 수행한 것으로 보입니다. 또한 모델 결과를 confidence와 함께 반환해 프론트엔드에서 신뢰도 표시가 가능하도록 응답 형식을 설계한 점은 API 설계 및 데이터 포맷 설계 능력을 보여줍니다. 다만, 아키텍처 설계, 성능 개선, 운영/장애 대응, 복잡한 문제 해결 등 고급 수준의 근거가 명시적으로 제시되지 않아 '높음'보다는 '보통' 수준으로 판단됩니다.",
-"user_id": null,
-"planning": 3.3,
-"strength": "PyTorch를 활용한 이미지 분류 모델 학습 및 API 구현 능력, OpenCV를 이용한 전처리 및 데이터 증강 경험, FastAPI를 통한 추론 API 설계 및 응답 형식 설계",
-"weakness": "고급 아키텍처 설계, 성능 최적화, 운영/장애 대응 경험 부족, 협업 경험(collaboration 3.5)은 보통 수준이지만 고급 협업 프로젝트 경험은 제한적",
-"experience": [
-"PyTorch로 이미지 분류 모델을 학습하고 OpenCV 전처리, 데이터 증강, FastAPI 기반 추론 API를 연결했습니다.",
-"모델 결과를 confidence와 함께 반환해 프론트엔드에서 신뢰도 표시가 가능하도록 응답 형식을 설계했습니다."
-],
-"leadership": 3.1,
-"suggestion": "PyTorch와 FastAPI를 활용한 AI 서비스 백엔드 개발, OpenCV를 이용한 이미지 전처리 파이프라인 구축, 모델 배포 및 모니터링 담당",
-"flexibility": 3.9,
-"skill_level": "보통",
-"stack_score": "PyTorch: 5점\nOpenCV: 4점\nNumPy: 3점\nFastAPI: 5점",
-"wants_leader": false,
-"collaboration": 3.5,
-"communication": 3.7,
-"implementation": 4.2,
-"problemSolving": 4.4,
-"responsibility": 3.8,
-"learningAbility": 4.5,
-"matching_traits": {
-"trait_average": 3.3,
-"leader_score": 3.3,
-"low_traits": [],
-"high_traits": [
-{
-"trait": "problemSolving",
-"label": "문제 해결력",
-"score": 4
-},
-{
-"trait": "implementation",
-"label": "구현 실행력",
-"score": 4
-},
-{
-"trait": "learningAbility",
-"label": "학습 성장성",
-"score": 4
-}
-],
-"defaulted_traits": []
-},
-"preferred_members": [],
-"development_scores": {
-"leadership": 3,
-"problemSolving": 4,
-"implementation": 4,
-"learningAbility": 4,
-"planning": 3
-},
-"emotionalStability": 3.6,
-"personality_scores": {
-"communication": 3,
-"responsibility": 3,
-"collaboration": 3,
-"flexibility": 3,
-"emotionalStability": 3
-},
-"development_summary": {
-"strengths": [
-{
-"trait": "problemSolving",
-"label": "문제 해결력",
-"score": 4
-},
-{
-"trait": "implementation",
-"label": "구현 실행력",
-"score": 4
-},
-{
-"trait": "learningAbility",
-"label": "학습 성장성",
-"score": 4
-}
-],
-"risks": [],
-"summary": "강점: 문제 해결력, 구현 실행력, 학습 성장성 / 리스크: 낮은 리스크 성향은 없습니다."
-},
-"personality_summary": {
-"strengths": [],
-"risks": [],
-"summary": "강점: 두드러진 고점 성향은 없고 전반적으로 중립 수준입니다. / 리스크: 낮은 리스크 성향은 없습니다."
-},
-"matching_preferences": {
-"preferred_members": [],
-"wants_leader": false,
-"ignored_preferences": []
-}
-},
-{
-"name": "김아린",
-"role": "DESIGN",
-"grade": "GRADE_2",
-"stack": [
-"Figma",
-"MUI",
-"Responsive UI",
-"Usability Test"
-],
-"reason": "학생은 Figma와 MUI를 활용한 UI/UX 디자인 경험을 보유하고 있으며, 디자인 시스템 구축과 사용성 개선에 중점을 둔 구체적인 구현 근거가 있습니다. 그러나 백엔드, 데이터 처리, API 연동, 배포, 최적화 등 기술 스택에 대한 직접적인 구현 경험이 없으며, stack에 포함된 기술 중 Figma와 MUI는 디자인 도구로서 구현 깊이가 제한적입니다. 따라서 기술 숙련도 점수는 낮게 평가되고, skill_level은 '보통'으로 판단됩니다.",
-"user_id": null,
-"planning": 4.2,
-"strength": "디자인 시스템 구축 및 사용성 개선 경험, 반응형 레이아웃 설계 능력",
-"weakness": "백엔드, 데이터 처리, API 연동, 배포, 최적화 등 기술 스택에 대한 구현 경험 부족",
-"experience": [
-"MUI 기반 테이블 화면을 디자인하고 반응형 레이아웃, 필터 UI, 상세 패널의 사용성을 개선한 경험이 있습니다.",
-"디자인 시스템 색상과 spacing 규칙을 정리해 프론트엔드 구현 시 화면 간 일관성을 유지하도록 도왔습니다."
-],
-"leadership": 3.5,
-"suggestion": "프론트엔드 개발자, UX 리서처, 백엔드 개발자와 협업하여 UI/UX 설계와 구현 간 연결 고리 역할을 수행하면 좋습니다.",
-"flexibility": 4.2,
-"skill_level": "보통",
-"stack_score": "Figma: 4점\nMUI: 4점\nResponsive UI: 4점\nUsability Test: 4점",
-"wants_leader": false,
-"collaboration": 4.3,
-"communication": 4.5,
-"implementation": 3.7,
-"problemSolving": 3.6,
-"responsibility": 4.1,
-"learningAbility": 3.8,
-"matching_traits": {
-"trait_average": 3.5,
-"leader_score": 3.3,
-"low_traits": [],
-"high_traits": [
-{
-"trait": "communication",
-"label": "소통",
-"score": 4
-},
-{
-"trait": "responsibility",
-"label": "책임감",
-"score": 4
-},
-{
-"trait": "collaboration",
-"label": "협업",
-"score": 4
-},
-{
-"trait": "flexibility",
-"label": "유연성",
-"score": 4
-},
-{
-"trait": "planning",
-"label": "기획 정리력",
-"score": 4
-}
-],
-"defaulted_traits": []
-},
-"preferred_members": [],
-"development_scores": {
-"leadership": 3,
-"problemSolving": 3,
-"implementation": 3,
-"learningAbility": 3,
-"planning": 4
-},
-"emotionalStability": 3.8,
-"personality_scores": {
-"communication": 4,
-"responsibility": 4,
-"collaboration": 4,
-"flexibility": 4,
-"emotionalStability": 3
-},
-"development_summary": {
-"strengths": [
-{
-"trait": "planning",
-"label": "기획 정리력",
-"score": 4
-}
-],
-"risks": [],
-"summary": "강점: 기획 정리력 / 리스크: 낮은 리스크 성향은 없습니다."
-},
-"personality_summary": {
-"strengths": [
-{
-"trait": "communication",
-"label": "소통",
-"score": 4
-},
-{
-"trait": "responsibility",
-"label": "책임감",
-"score": 4
-},
-{
-"trait": "collaboration",
-"label": "협업",
-"score": 4
-},
-{
-"trait": "flexibility",
-"label": "유연성",
-"score": 4
-}
-],
-"risks": [],
-"summary": "강점: 소통, 책임감, 협업, 유연성 / 리스크: 낮은 리스크 성향은 없습니다."
-},
-"matching_preferences": {
-"preferred_members": [],
-"wants_leader": false,
-"ignored_preferences": []
-}
-},
-{
-"name": "민하준",
-"role": "APP",
-"grade": "GRADE_2",
-"stack": [
-"Kotlin",
-"Android Jetpack",
-"Room",
-"Retrofit"
-],
-"reason": "민하준은 Android 앱 개발 경험이 2건이며, Kotlin과 Android Jetpack을 사용해 로그인, 목록, 상세 화면을 구현하고 Retrofit으로 백엔드 API를 연동했습니다. 또한 Room을 이용해 오프라인 임시 저장과 서버 동기화 실패 시 재시도 흐름을 처리했습니다. 이는 단순 클론코딩이나 튜토리얼 수준을 넘어 여러 기능이 결합된 프로젝트를 구조적으로 구현하고 주요 문제를 해결한 사례에 해당합니다. 따라서 '보통' 수준의 기술 숙련도로 판단됩니다.",
-"user_id": null,
-"planning": 3.4,
-"strength": "Kotlin과 Android Jetpack을 활용한 다중 화면 구현 및 API 연동 능력, Room을 통한 오프라인 데이터 관리와 재시도 로직 구현",
-"weakness": "아키텍처 설계, 성능 최적화, 운영/장애 대응 경험이 부족하며, 고급 문제 해결 및 테스트 자동화 경험이 제한적입니다.",
-"experience": [
-"Kotlin과 Android Jetpack으로 로그인, 목록, 상세 화면을 구현하고 Retrofit으로 백엔드 API를 연동했습니다.",
-"Room을 이용해 오프라인 임시 저장을 구현하고 서버 동기화 실패 시 재시도 흐름을 처리했습니다."
-],
-"leadership": 3.6,
-"suggestion": "복잡한 상태 관리와 API 연동이 필요한 Android 앱 개발 프로젝트에 적합하며, 백엔드와의 연동 및 데이터 동기화 경험이 있는 학생과 협업하면 시너지가 큽니다.",
-"flexibility": 3.9,
-"skill_level": "보통",
-"stack_score": "Kotlin: 5점\nAndroid Jetpack: 5점\nRoom: 6점\nRetrofit: 6점",
-"wants_leader": false,
-"collaboration": 3.7,
-"communication": 3.8,
-"implementation": 4.4,
-"problemSolving": 4.1,
-"responsibility": 4.0,
-"learningAbility": 3.9,
-"matching_traits": {
-"trait_average": 3.3,
-"leader_score": 3.3,
-"low_traits": [],
-"high_traits": [
-{
-"trait": "responsibility",
-"label": "책임감",
-"score": 4
-},
-{
-"trait": "problemSolving",
-"label": "문제 해결력",
-"score": 4
-},
-{
-"trait": "implementation",
-"label": "구현 실행력",
-"score": 4
-}
-],
-"defaulted_traits": []
-},
-"preferred_members": [],
-"development_scores": {
-"leadership": 3,
-"problemSolving": 4,
-"implementation": 4,
-"learningAbility": 3,
-"planning": 3
-},
-"emotionalStability": 3.5,
-"personality_scores": {
-"communication": 3,
-"responsibility": 4,
-"collaboration": 3,
-"flexibility": 3,
-"emotionalStability": 3
-},
-"development_summary": {
-"strengths": [
-{
-"trait": "problemSolving",
-"label": "문제 해결력",
-"score": 4
-},
-{
-"trait": "implementation",
-"label": "구현 실행력",
-"score": 4
-}
-],
-"risks": [],
-"summary": "강점: 문제 해결력, 구현 실행력 / 리스크: 낮은 리스크 성향은 없습니다."
-},
-"personality_summary": {
-"strengths": [
-{
-"trait": "responsibility",
-"label": "책임감",
-"score": 4
-}
-],
-"risks": [],
-"summary": "강점: 책임감 / 리스크: 낮은 리스크 성향은 없습니다."
-},
-"matching_preferences": {
-"preferred_members": [],
-"wants_leader": false,
-"ignored_preferences": []
-}
-},
-{
-"name": "나현우",
-"role": "BACKEND",
-"grade": "GRADE_2",
-"stack": [
-"Spring Security",
-"Redis",
-"Spring Batch",
-"PostgreSQL"
-],
-"reason": "학생 나현우는 Spring Security와 Redis를 활용한 refresh token 저장, 로그아웃 처리, 권한별 접근 제한 구현, 그리고 Spring Batch를 이용한 매일 새벽 통계 데이터 집계 및 실패 로그 재실행 흐름 정리 등의 구체적인 구현 경험을 가지고 있습니다. 이는 단순한 튜토리얼이나 클론코딩 수준을 넘어, 인증/인가 시스템 설계와 배치 작업의 운영/장애 대응까지 포함하는 고급 구현 사례에 해당합니다. 따라서 skill_level은 '보통'으로 판정합니다.",
-"user_id": null,
-"planning": 3.9,
-"strength": "인증/인가 시스템 설계와 배치 작업의 운영/장애 대응까지 포함한 고급 구현 경험",
-"weakness": "PostgreSQL에 대한 구체적인 구현 경험이 부족하여 데이터베이스 설계 및 최적화 역량이 상대적으로 약함",
-"experience": [
-"Spring Security와 Redis를 이용해 refresh token 저장, 로그아웃 처리, 권한별 접근 제한을 구현했습니다.",
-"Spring Batch로 매일 새벽 통계 데이터를 집계하는 작업을 만들고 실패 로그를 확인해 재실행하는 흐름을 정리했습니다."
-],
-"leadership": 4.2,
-"suggestion": "Spring Boot 기반 마이크로서비스 아키텍처 설계 및 운영 경험이 있는 학생, 또는 데이터 파이프라인/ETL 작업을 담당하는 학생",
-"flexibility": 3.8,
-"skill_level": "보통",
-"stack_score": "Spring Security: 7점\nRedis: 6점\nSpring Batch: 7점\nPostgreSQL: 3점",
-"wants_leader": true,
-"collaboration": 4.0,
-"communication": 4.1,
-"implementation": 4.7,
-"problemSolving": 4.5,
-"responsibility": 4.4,
-"learningAbility": 4.1,
-"matching_traits": {
-"trait_average": 3.7,
-"leader_score": 3.7,
-"low_traits": [],
-"high_traits": [
-{
-"trait": "communication",
-"label": "소통",
-"score": 4
-},
-{
-"trait": "responsibility",
-"label": "책임감",
-"score": 4
-},
-{
-"trait": "collaboration",
-"label": "협업",
-"score": 4
-},
-{
-"trait": "leadership",
-"label": "리더십",
-"score": 4
-},
-{
-"trait": "problemSolving",
-"label": "문제 해결력",
-"score": 4
-},
-{
-"trait": "implementation",
-"label": "구현 실행력",
-"score": 4
-},
-{
-"trait": "learningAbility",
-"label": "학습 성장성",
-"score": 4
-}
-],
-"defaulted_traits": []
-},
-"preferred_members": [],
-"development_scores": {
-"leadership": 4,
-"problemSolving": 4,
-"implementation": 4,
-"learningAbility": 4,
-"planning": 3
-},
-"emotionalStability": 3.9,
-"personality_scores": {
-"communication": 4,
-"responsibility": 4,
-"collaboration": 4,
-"flexibility": 3,
-"emotionalStability": 3
-},
-"development_summary": {
-"strengths": [
-{
-"trait": "leadership",
-"label": "리더십",
-"score": 4
-},
-{
-"trait": "problemSolving",
-"label": "문제 해결력",
-"score": 4
-},
-{
-"trait": "implementation",
-"label": "구현 실행력",
-"score": 4
-},
-{
-"trait": "learningAbility",
-"label": "학습 성장성",
-"score": 4
-}
-],
-"risks": [],
-"summary": "강점: 리더십, 문제 해결력, 구현 실행력, 학습 성장성 / 리스크: 낮은 리스크 성향은 없습니다."
-},
-"personality_summary": {
-"strengths": [
-{
-"trait": "communication",
-"label": "소통",
-"score": 4
-},
-{
-"trait": "responsibility",
-"label": "책임감",
-"score": 4
-},
-{
-"trait": "collaboration",
-"label": "협업",
-"score": 4
-}
-],
-"risks": [],
-"summary": "강점: 소통, 책임감, 협업 / 리스크: 낮은 리스크 성향은 없습니다."
-},
-"matching_preferences": {
-"preferred_members": [],
-"wants_leader": true,
-"ignored_preferences": [
-"stu2317 선호는 분석 데이터에 없는 학생이라 제외했습니다."
-]
-}
-},
-{
-"name": "노시현",
-"role": "FULLSTACK",
-"grade": "GRADE_2",
-"stack": [
-"React",
-"Node.js",
-"Express",
-"MongoDB"
-],
-"reason": "노시현의 experience는 React와 Express를 사용해 게시판형 서비스를 직접 구현했으며, 파일 업로드, 댓글, 좋아요 기능을 한 흐름으로 연결했습니다. 또한 프론트와 백엔드 간 API 명세 변경이 화면 상태에 미치는 영향을 빠르게 조정한 경험이 있습니다. 이는 여러 기능이 결합된 프로젝트를 구조적으로 구현하고 주요 문제를 해결한 사례에 해당합니다. 따라서 skill_level은 '보통'으로 판정합니다. stack_score는 각 기술 스택에 대해 experience에 드러난 구현 깊이를 기준으로 평가합니다. React: 게시판형 서비스 구현, 파일 업로드, 댓글, 좋아요 등 여러 기능을 연결했으며, API 명세 변경에 따른 화면 상태 조정 경험이 있어 7점. Node.js: Express와 함께 백엔드 로직을 구현했으며, API 명세 변경에 따른 조정 경험이 있어 7점. Express: API 설계 및 구현, 프론트와의 연동, 상태 변화에 대한 조정 경험이 있어 7점. MongoDB: 게시판형 서비스의 데이터 저장소로 사용되었으며, 파일 업로드, 댓글, 좋아요 등 다양한 데이터 처리 경험이 있어 7점. 총 stack_score는 7점.",
+"reason": "학생은 Spring Boot를 활용한 CRUD REST API 구현, JWT 인증 흐름 구현, JPA 연관관계를 통한 데이터 저장 및 조회 등 구체적인 구현 경험을 가지고 있습니다. 이러한 경험은 단순 튜토리얼 수준을 넘어 여러 기능이 결합된 프로젝트를 구조적으로 구현한 것으로 보이며, 설계(계층 분리), 인증, 데이터 처리 등 실전 요소가 포함되어 있습니다. 따라서 '보통' 수준의 기술 숙련도로 판단됩니다.",
 "user_id": null,
 "planning": 4.0,
-"strength": "여러 기능이 결합된 프로젝트를 구조적으로 구현하고, 프론트와 백엔드 간 API 연동 및 상태 변화에 대한 조정 능력이 뛰어납니다.",
-"weakness": "아키텍처 설계, 성능 개선, 운영/장애 대응, 복잡한 문제 해결 경험이 부족하여 고급 프로젝트 리딩에는 한계가 있습니다.",
+"strength": "Spring Boot 기반의 REST API 설계 및 구현 능력, JWT 인증 시스템 구축 경험, JPA를 활용한 데이터 모델링 및 연관관계 관리 능력",
+"weakness": "고급 아키텍처 설계, 성능 최적화, 운영/장애 대응, 복잡한 문제 해결 경험이 부족함",
 "experience": [
-"React와 Express로 게시판형 서비스를 만들고 파일 업로드, 댓글, 좋아요 기능을 한 흐름으로 연결했습니다.",
-"프론트와 백엔드를 모두 다뤄 API 명세 변경이 화면 상태에 미치는 영향을 빠르게 조정한 경험이 있습니다."
+"Spring Boot로 공지 CRUD REST API를 구현하고 Controller, Service, Repository 계층을 분리했습니다.",
+"JWT 로그인 흐름을 구현하며 accessToken을 발급하고 Spring Security 필터에서 인증을 검증하도록 구성했습니다.",
+"JPA 연관관계를 사용해 사용자와 팀 데이터를 저장하고 MySQL 기준으로 조회 쿼리를 테스트했습니다."
 ],
-"leadership": 3.7,
-"suggestion": "프론트엔드에서 상태 관리와 UI 최적화를, 백엔드에서 API 설계와 데이터 처리를 담당하는 FULLSTACK 개발자와 협업하면 시너지가 큽니다. 특히 React와 Node.js를 깊이 있게 사용하는 개발자와 함께하면 프로젝트 완성도가 높아질 것입니다.",
-"flexibility": 4.1,
+"leadership": 3.0,
+"suggestion": "Spring Boot와 JPA를 활용한 백엔드 개발, 인증 및 데이터 처리 로직 구현, 팀 프로젝트에서 API 설계 및 유지보수 역할",
+"flexibility": 3.5,
 "skill_level": "보통",
-"stack_score": "React: 7점\nNode.js: 7점\nExpress: 7점\nMongoDB: 7점",
+"stack_score": "Java: 5점\nSpring Boot: 6점\nJPA: 5점\nMySQL: 4점\nJWT: 5점",
 "wants_leader": false,
-"collaboration": 3.9,
-"communication": 4.0,
-"implementation": 4.1,
-"problemSolving": 4.2,
-"responsibility": 4.0,
+"collaboration": 4.0,
+"communication": 3.5,
+"implementation": 4.5,
+"problemSolving": 4.5,
+"responsibility": 4.5,
+"analysis_status": "SUCCESS",
 "learningAbility": 4.0,
 "matching_traits": {
-"trait_average": 3.7,
+"trait_average": 3.6,
 "leader_score": 3.6,
 "low_traits": [],
 "high_traits": [
 {
-"trait": "communication",
-"label": "소통",
-"score": 4
-},
-{
 "trait": "responsibility",
 "label": "책임감",
 "score": 4
 },
 {
-"trait": "flexibility",
-"label": "유연성",
+"trait": "collaboration",
+"label": "협업",
 "score": 4
 },
 {
@@ -1422,7 +229,9 @@
 "score": 4
 }
 ],
-"defaulted_traits": []
+"defaulted_traits": [],
+"response_reliability": "HIGH",
+"response_reliability_weight": 1.0
 },
 "preferred_members": [],
 "development_scores": {
@@ -1432,12 +241,12 @@
 "learningAbility": 4,
 "planning": 4
 },
-"emotionalStability": 3.7,
+"emotionalStability": 3.5,
 "personality_scores": {
-"communication": 4,
+"communication": 3,
 "responsibility": 4,
-"collaboration": 3,
-"flexibility": 4,
+"collaboration": 4,
+"flexibility": 3,
 "emotionalStability": 3
 },
 "development_summary": {
@@ -1469,6 +278,140 @@
 "personality_summary": {
 "strengths": [
 {
+"trait": "responsibility",
+"label": "책임감",
+"score": 4
+},
+{
+"trait": "collaboration",
+"label": "협업",
+"score": 4
+}
+],
+"risks": [],
+"summary": "강점: 책임감, 협업 / 리스크: 낮은 리스크 성향은 없습니다."
+},
+"matching_preferences": {
+"preferred_members": [],
+"wants_leader": false,
+"ignored_preferences": []
+},
+"response_reliability": "HIGH"
+},
+{
+"name": "김세찬",
+"role": "AI",
+"grade": "GRADE_2",
+"stack": [
+"Python",
+"FastAPI",
+"Pandas",
+"LangChain",
+"Prompt Engineering"
+],
+"reason": "학생 김세찬은 FastAPI를 활용해 학생 분석 요청을 받는 API를 설계하고, 설문 데이터를 기반으로 기술 점수와 역할 추천 결과를 반환하는 기능을 구현했습니다. 또한 Pandas를 사용해 학생별 기술 스택과 성향 점수를 정리하고 JSON 데이터 구조를 설계했으며, LangChain과 Prompt Engineering을 통해 LLM이 학생 이름을 임의로 생성하지 않도록 제한하는 프롬프트를 작성했습니다. 이러한 경험은 단순 클론코딩이나 튜토리얼 수준을 넘어, 여러 기능이 결합된 프로젝트를 독립적으로 설계하고 구현한 것으로 보입니다. 특히 API 설계, 데이터 처리, 프롬프트 엔지니어링, LLM 제어 등 다양한 기술을 실제 문제 해결에 적용한 점이 고급 수준에 해당합니다. 따라서 skill_level은 '보통'으로 판정합니다.",
+"user_id": null,
+"planning": 3.5,
+"strength": "API 설계 및 구현, 데이터 처리, LLM 프롬프트 제어, JSON 데이터 구조화",
+"weakness": "아키텍처 설계 및 성능 최적화 경험 부족, 운영/장애 대응 경험 없음",
+"experience": [
+"FastAPI로 학생 분석 요청을 받는 API를 만들고 설문 데이터를 기반으로 기술 점수와 역할 추천 결과를 반환했습니다.",
+"Pandas로 학생별 기술 스택과 성향 점수를 정리하고 팀 매칭에 사용할 수 있도록 JSON 데이터 구조를 설계했습니다.",
+"프롬프트를 수정해 LLM이 학생 이름을 임의로 만들지 않고 주어진 학생 목록 안에서만 결과를 생성하도록 제한했습니다."
+],
+"leadership": 3.5,
+"suggestion": "데이터 파이프라인 구축, AI 기반 추천 시스템 개발, 백엔드 API 설계, 모델 파인튜닝 및 프롬프트 엔지니어링 협업",
+"flexibility": 4.0,
+"skill_level": "보통",
+"stack_score": "Python: 5점\nFastAPI: 7점\nPandas: 5점\nLangChain: 6점\nPrompt Engineering: 5점",
+"wants_leader": false,
+"collaboration": 3.5,
+"communication": 4.0,
+"implementation": 4.0,
+"problemSolving": 4.5,
+"responsibility": 4.0,
+"analysis_status": "SUCCESS",
+"learningAbility": 4.5,
+"matching_traits": {
+"trait_average": 3.6,
+"leader_score": 3.3,
+"low_traits": [],
+"high_traits": [
+{
+"trait": "communication",
+"label": "소통",
+"score": 4
+},
+{
+"trait": "responsibility",
+"label": "책임감",
+"score": 4
+},
+{
+"trait": "flexibility",
+"label": "유연성",
+"score": 4
+},
+{
+"trait": "problemSolving",
+"label": "문제 해결력",
+"score": 4
+},
+{
+"trait": "implementation",
+"label": "구현 실행력",
+"score": 4
+},
+{
+"trait": "learningAbility",
+"label": "학습 성장성",
+"score": 4
+}
+],
+"defaulted_traits": [],
+"response_reliability": "HIGH",
+"response_reliability_weight": 1.0
+},
+"preferred_members": [],
+"development_scores": {
+"leadership": 3,
+"problemSolving": 4,
+"implementation": 4,
+"learningAbility": 4,
+"planning": 3
+},
+"emotionalStability": 3.5,
+"personality_scores": {
+"communication": 4,
+"responsibility": 4,
+"collaboration": 3,
+"flexibility": 4,
+"emotionalStability": 3
+},
+"development_summary": {
+"strengths": [
+{
+"trait": "problemSolving",
+"label": "문제 해결력",
+"score": 4
+},
+{
+"trait": "implementation",
+"label": "구현 실행력",
+"score": 4
+},
+{
+"trait": "learningAbility",
+"label": "학습 성장성",
+"score": 4
+}
+],
+"risks": [],
+"summary": "강점: 문제 해결력, 구현 실행력, 학습 성장성 / 리스크: 낮은 리스크 성향은 없습니다."
+},
+"personality_summary": {
+"strengths": [
+{
 "trait": "communication",
 "label": "소통",
 "score": 4
@@ -1491,47 +434,220 @@
 "preferred_members": [],
 "wants_leader": false,
 "ignored_preferences": []
-}
+},
+"response_reliability": "HIGH"
 },
 {
-"name": "이건우",
-"role": "SECURITY",
+"name": "이송민",
+"role": "DESIGN",
 "grade": "GRADE_2",
 "stack": [
-"Linux",
-"OWASP",
-"JWT",
-"Burp Suite"
+"Figma",
+"Design System",
+"Wireframe",
+"Prototype",
+"UI/UX"
 ],
-"reason": "이건우 학생은 SECURITY 역할에 맞춰 Linux, OWASP, JWT, Burp Suite 스택을 보유하고 있으며, experience에 JWT 인증 흐름과 OWASP Top 10 기반의 보안 점검 경험이 구체적으로 기록되어 있습니다. 이는 보안 설계 및 문제 해결 능력을 보여주는 고급 수준의 구현 경험이며, collaboration, communication, responsibility, flexibility 점수가 모두 3.5 이상으로 협업 능력도 우수합니다. 따라서 skill_level은 '보통'으로 판정하고, stack_score는 각 기술별 실제 구현 깊이를 기준으로 7점, 6점, 5점, 4점으로 평가합니다.",
+"reason": "이송민 학생은 DESIGN 역할을 가지고 있으며, Figma, Design System, Wireframe, Prototype, UI/UX 스택을 보유하고 있습니다. 경험 항목에서는 Figma를 활용한 와이어프레임 제작, 공통 컴포넌트 기준 정리, 정보 우선순위 정리, 디자인 시스템 색상 및 버튼 상태 정리 등 구체적인 디자인 산출물을 직접 제작한 사례가 있습니다. 이는 단순 튜토리얼이나 클론코딩 수준을 넘어 실제 프로젝트에서의 설계 및 구조화 경험을 보여줍니다. 또한 collaboration 점수가 4.5로 높아 협업 능력이 우수하며, communication, responsibility, flexibility, planning 점수도 모두 4.0 이상으로 높습니다. 다만 leadership 점수가 3.0으로 상대적으로 낮아 팀 리딩보다는 디자인 구현에 강점을 보이는 것으로 판단됩니다. 따라서 skill_level은 '보통'으로 판정하고, stack_score는 각 기술 스택에 대해 구체적인 구현 근거가 있으므로 5점 이상으로 평가합니다.",
 "user_id": null,
-"planning": 3.7,
-"strength": "보안 설계 및 점검 능력, OWASP Top 10 기반의 체계적인 보안 취약점 분석, JWT 인증 흐름의 보안 취약점 보완 경험",
-"weakness": "고급 보안 아키텍처 설계 경험 부족, Burp Suite를 활용한 실제 공격 시나리오 대응 경험 부족",
+"planning": 4.5,
+"strength": "Figma를 활용한 와이어프레임 및 프로토타입 제작 능력, 디자인 시스템 구조화 경험, 정보 우선순위 정리 능력, 협업 및 커뮤니케이션 능력",
+"weakness": "리더십 및 팀 리딩 경험이 상대적으로 부족하며, 디자인 구현보다는 설계 단계에 강점이 있습니다. 실제 코드 구현이나 프론트엔드 개발 스택에 대한 경험은 없으므로, 개발자와의 협업 시 구현 세부사항에 대한 이해가 필요할 수 있습니다.",
 "experience": [
-"JWT 인증 흐름에서 토큰 저장 위치, 만료 처리, 권한 체크 누락 가능성을 점검하고 보완안을 정리했습니다.",
-"OWASP Top 10 기준으로 입력값 검증, CORS 설정, 파일 업로드 확장자 제한을 점검한 경험이 있습니다."
+"Figma로 학생과 관리자 화면 흐름을 분리한 와이어프레임을 제작하고 공통 컴포넌트 기준을 정리했습니다.",
+"공지 상세, 팀 관리, 학생 관리 모달 화면의 정보 우선순위를 정리해 사용자가 필요한 정보를 먼저 볼 수 있도록 디자인했습니다.",
+"디자인 시스템 색상과 버튼 상태를 정리해 프론트엔드 CSS 변수로 옮기기 쉽게 구성했습니다."
 ],
-"leadership": 3.4,
-"suggestion": "보안 아키텍처를 설계할 수 있는 고급 보안 전문가, 또는 보안 테스트 자동화를 구현할 수 있는 보안 엔지니어와 협업하면 시너지가 클 것입니다.",
-"flexibility": 3.9,
+"leadership": 3.0,
+"suggestion": "프론트엔드 개발자와 협업하여 UI/UX 디자인을 구체화하고, 디자인 시스템을 실제 코드로 구현할 수 있는 개발자와 매칭하면 시너지가 클 것입니다. 또한 프로젝트 초기 단계에서 사용자 흐름을 설계하는 역할을 맡으면 좋습니다.",
+"flexibility": 4.5,
 "skill_level": "보통",
-"stack_score": "Linux: 7점\nOWASP: 6점\nJWT: 5점\nBurp Suite: 4점",
+"stack_score": "Figma: 5점\nDesign System: 5점\nWireframe: 4점\nPrototype: 4점\nUI/UX: 4점",
 "wants_leader": false,
-"collaboration": 3.6,
-"communication": 3.8,
-"implementation": 3.8,
-"problemSolving": 4.0,
-"responsibility": 3.7,
-"learningAbility": 4.4,
+"collaboration": 4.5,
+"communication": 4.5,
+"implementation": 3.5,
+"problemSolving": 3.5,
+"responsibility": 4.0,
+"analysis_status": "SUCCESS",
+"learningAbility": 4.0,
 "matching_traits": {
-"trait_average": 3.2,
+"trait_average": 3.7,
 "leader_score": 3.3,
 "low_traits": [],
 "high_traits": [
 {
+"trait": "communication",
+"label": "소통",
+"score": 4
+},
+{
+"trait": "responsibility",
+"label": "책임감",
+"score": 4
+},
+{
+"trait": "collaboration",
+"label": "협업",
+"score": 4
+},
+{
+"trait": "flexibility",
+"label": "유연성",
+"score": 4
+},
+{
+"trait": "emotionalStability",
+"label": "감정 안정성",
+"score": 4
+},
+{
+"trait": "learningAbility",
+"label": "학습 성장성",
+"score": 4
+},
+{
+"trait": "planning",
+"label": "기획 정리력",
+"score": 4
+}
+],
+"defaulted_traits": [],
+"response_reliability": "HIGH",
+"response_reliability_weight": 1.0
+},
+"preferred_members": [],
+"development_scores": {
+"leadership": 3,
+"problemSolving": 3,
+"implementation": 3,
+"learningAbility": 4,
+"planning": 4
+},
+"emotionalStability": 4.0,
+"personality_scores": {
+"communication": 4,
+"responsibility": 4,
+"collaboration": 4,
+"flexibility": 4,
+"emotionalStability": 4
+},
+"development_summary": {
+"strengths": [
+{
+"trait": "learningAbility",
+"label": "학습 성장성",
+"score": 4
+},
+{
+"trait": "planning",
+"label": "기획 정리력",
+"score": 4
+}
+],
+"risks": [],
+"summary": "강점: 학습 성장성, 기획 정리력 / 리스크: 낮은 리스크 성향은 없습니다."
+},
+"personality_summary": {
+"strengths": [
+{
+"trait": "communication",
+"label": "소통",
+"score": 4
+},
+{
+"trait": "responsibility",
+"label": "책임감",
+"score": 4
+},
+{
+"trait": "collaboration",
+"label": "협업",
+"score": 4
+},
+{
+"trait": "flexibility",
+"label": "유연성",
+"score": 4
+},
+{
+"trait": "emotionalStability",
+"label": "감정 안정성",
+"score": 4
+}
+],
+"risks": [],
+"summary": "강점: 소통, 책임감, 협업, 유연성, 감정 안정성 / 리스크: 낮은 리스크 성향은 없습니다."
+},
+"matching_preferences": {
+"preferred_members": [],
+"wants_leader": false,
+"ignored_preferences": []
+},
+"response_reliability": "HIGH"
+},
+{
+"name": "노지완",
+"role": "APP",
+"grade": "GRADE_2",
+"stack": [
+"Flutter",
+"Dart",
+"Firebase",
+"Provider",
+"REST API"
+],
+"reason": "학생은 Flutter와 Dart를 사용해 로그인 화면, 설문 입력 화면, 상태 관리(Provider), FCM 알림, REST API 연동 등 여러 기능을 직접 구현한 경험이 있습니다. 그러나 아키텍처 설계, 성능 개선, 운영/장애 대응, 복잡한 문제 해결 등 고급 수준의 근거는 경험 내역에 명시되어 있지 않습니다. 따라서 '높음'보다는 '보통' 수준으로 평가하는 것이 적절합니다.",
+"user_id": null,
+"planning": 3.5,
+"strength": "Flutter와 Dart를 활용한 다중 화면 구현 및 상태 관리, Firebase Cloud Messaging과 REST API 연동을 통한 실전 앱 개발 경험",
+"weakness": "아키텍처 설계, 성능 최적화, 운영/장애 대응 등 고급 개발 경험이 부족하며, 복잡한 문제 해결이나 대규모 프로젝트 주도 경험이 제한적입니다.",
+"experience": [
+"Flutter로 로그인 화면과 설문 입력 화면을 구현하고 Provider를 사용해 입력 상태를 관리했습니다.",
+"Firebase Cloud Messaging을 이용해 공지 알림을 받는 테스트 앱을 제작했습니다.",
+"REST API 응답을 받아 모바일 리스트 화면에 렌더링하고 로딩 상태와 실패 상태를 분리했습니다."
+],
+"leadership": 3.0,
+"suggestion": "Firebase와 REST API를 활용한 백엔드 연동이 필요한 팀원과 협업하면 시너지가 클 것입니다. 특히, 상태 관리와 실시간 알림 구현에 강점을 가진 학생이므로, UI/UX 중심의 앱 개발이나 데이터 연동이 필요한 프로젝트에 적합합니다.",
+"flexibility": 4.0,
+"skill_level": "보통",
+"stack_score": "Flutter: 5점\nDart: 5점\nFirebase: 4점\nProvider: 4점\nREST API: 4점",
+"wants_leader": false,
+"collaboration": 4.0,
+"communication": 3.5,
+"implementation": 4.0,
+"problemSolving": 4.0,
+"responsibility": 4.0,
+"analysis_status": "SUCCESS",
+"learningAbility": 4.5,
+"matching_traits": {
+"trait_average": 3.6,
+"leader_score": 3.3,
+"low_traits": [],
+"high_traits": [
+{
+"trait": "responsibility",
+"label": "책임감",
+"score": 4
+},
+{
+"trait": "collaboration",
+"label": "협업",
+"score": 4
+},
+{
+"trait": "flexibility",
+"label": "유연성",
+"score": 4
+},
+{
 "trait": "problemSolving",
 "label": "문제 해결력",
+"score": 4
+},
+{
+"trait": "implementation",
+"label": "구현 실행력",
 "score": 4
 },
 {
@@ -1540,22 +656,24 @@
 "score": 4
 }
 ],
-"defaulted_traits": []
+"defaulted_traits": [],
+"response_reliability": "HIGH",
+"response_reliability_weight": 1.0
 },
 "preferred_members": [],
 "development_scores": {
 "leadership": 3,
 "problemSolving": 4,
-"implementation": 3,
+"implementation": 4,
 "learningAbility": 4,
 "planning": 3
 },
 "emotionalStability": 3.5,
 "personality_scores": {
 "communication": 3,
-"responsibility": 3,
-"collaboration": 3,
-"flexibility": 3,
+"responsibility": 4,
+"collaboration": 4,
+"flexibility": 4,
 "emotionalStability": 3
 },
 "development_summary": {
@@ -1566,56 +684,250 @@
 "score": 4
 },
 {
+"trait": "implementation",
+"label": "구현 실행력",
+"score": 4
+},
+{
 "trait": "learningAbility",
 "label": "학습 성장성",
 "score": 4
 }
 ],
 "risks": [],
-"summary": "강점: 문제 해결력, 학습 성장성 / 리스크: 낮은 리스크 성향은 없습니다."
+"summary": "강점: 문제 해결력, 구현 실행력, 학습 성장성 / 리스크: 낮은 리스크 성향은 없습니다."
 },
 "personality_summary": {
-"strengths": [],
+"strengths": [
+{
+"trait": "responsibility",
+"label": "책임감",
+"score": 4
+},
+{
+"trait": "collaboration",
+"label": "협업",
+"score": 4
+},
+{
+"trait": "flexibility",
+"label": "유연성",
+"score": 4
+}
+],
 "risks": [],
-"summary": "강점: 두드러진 고점 성향은 없고 전반적으로 중립 수준입니다. / 리스크: 낮은 리스크 성향은 없습니다."
+"summary": "강점: 책임감, 협업, 유연성 / 리스크: 낮은 리스크 성향은 없습니다."
 },
 "matching_preferences": {
 "preferred_members": [],
 "wants_leader": false,
 "ignored_preferences": []
-}
+},
+"response_reliability": "HIGH"
 },
 {
-"name": "박서윤",
-"role": "AI",
+"name": "양원우",
+"role": "BACKEND",
 "grade": "GRADE_2",
 "stack": [
-"Python",
-"LangChain",
-"RAG",
-"Vector DB"
+"Java",
+"Spring Security",
+"Docker",
+"MySQL",
+"AWS"
 ],
-"reason": "박서윤 학생은 LangChain과 벡터 DB를 활용해 문서 검색 기반 Q&A 기능을 구현하고, 프롬프트 템플릿 개선 경험을 보유하고 있습니다. 이는 단순 튜토리얼 수준을 넘어 실제 문제 해결 및 성능 개선 근거가 있는 프로젝트 경험으로, 고급 기술 스택을 실제 서비스에 적용한 사례입니다. 따라서 기술 숙련도는 '보통' 수준이며, 협업 점수와 구현 능력도 높아 팀 프로젝트에서 중간 이상의 역할을 수행할 수 있습니다.",
+"reason": "Spring Security와 JWT를 활용한 권한 분리 및 Protected API 구현, Docker Compose를 통한 MySQL과 Spring Boot 서버 환경 구성, AWS 배포 테스트 및 환경변수/DB 연결 설정 분리 등 구체적인 구현 경험이 존재합니다. 이는 단순 튜토리얼 수준을 넘어 여러 기능이 결합된 프로젝트를 구조적으로 구현하고 주요 문제를 해결한 사례에 해당합니다. 따라서 skill_level은 '보통'으로 판정합니다.",
 "user_id": null,
-"planning": 3.8,
-"strength": "실제 서비스 수준의 AI 기반 Q&A 시스템을 설계하고 구현한 경험, 프롬프트 엔지니어링을 통한 답변 품질 개선 능력",
-"weakness": "아키텍처 설계나 대규모 시스템 운영 경험이 부족하며, 고급 문제 해결 및 장애 대응 경험이 제한적입니다.",
+"planning": 4.0,
+"strength": "Spring Security와 JWT를 활용한 권한 분리 및 Protected API 구현, Docker Compose를 통한 환경 구성, AWS 배포 및 환경변수/DB 연결 설정 분리 등 구체적인 구현 경험이 풍부합니다.",
+"weakness": "고급 아키텍처 설계, 성능 최적화, 장애 대응, 테스트 자동화 등 고급 운영 경험이 부족합니다. 또한, 현재 경험만으로는 복잡한 시스템 설계 및 주도적인 문제 해결 역량이 제한적입니다.",
 "experience": [
-"LangChain과 벡터 DB를 이용해 문서 검색 기반 Q&A 기능을 만들고, 검색 결과와 답변 근거를 함께 반환했습니다.",
-"프롬프트 템플릿을 여러 버전으로 비교하고 답변 누락 사례를 기록해 개선한 경험이 있습니다."
+"Spring Security와 JWT를 사용해 관리자/학생 권한을 분리하고 Protected API 접근 흐름을 구현했습니다.",
+"Docker Compose로 MySQL과 Spring Boot 서버 실행 환경을 구성하고 팀원이 같은 환경에서 실행할 수 있도록 정리했습니다.",
+"AWS 배포 테스트를 진행하며 환경변수와 DB 연결 설정을 분리했습니다."
+],
+"leadership": 4.5,
+"suggestion": "Spring Boot 기반의 백엔드 개발, 인증/인가 시스템 구축, Docker 기반 배포 환경 설정, AWS 클라우드 인프라 관리 경험이 있는 학생과 협업하면 시너지가 클 것입니다.",
+"flexibility": 3.5,
+"skill_level": "보통",
+"stack_score": "Java: 5점\nSpring Security: 5점\nDocker: 5점\nMySQL: 5점\nAWS: 5점",
+"wants_leader": true,
+"collaboration": 4.0,
+"communication": 4.0,
+"implementation": 4.5,
+"problemSolving": 4.5,
+"responsibility": 4.5,
+"analysis_status": "SUCCESS",
+"learningAbility": 4.0,
+"matching_traits": {
+"trait_average": 3.9,
+"leader_score": 4.0,
+"low_traits": [],
+"high_traits": [
+{
+"trait": "communication",
+"label": "소통",
+"score": 4
+},
+{
+"trait": "responsibility",
+"label": "책임감",
+"score": 4
+},
+{
+"trait": "collaboration",
+"label": "협업",
+"score": 4
+},
+{
+"trait": "emotionalStability",
+"label": "감정 안정성",
+"score": 4
+},
+{
+"trait": "leadership",
+"label": "리더십",
+"score": 4
+},
+{
+"trait": "problemSolving",
+"label": "문제 해결력",
+"score": 4
+},
+{
+"trait": "implementation",
+"label": "구현 실행력",
+"score": 4
+},
+{
+"trait": "learningAbility",
+"label": "학습 성장성",
+"score": 4
+},
+{
+"trait": "planning",
+"label": "기획 정리력",
+"score": 4
+}
+],
+"defaulted_traits": [],
+"response_reliability": "HIGH",
+"response_reliability_weight": 1.0
+},
+"preferred_members": [],
+"development_scores": {
+"leadership": 4,
+"problemSolving": 4,
+"implementation": 4,
+"learningAbility": 4,
+"planning": 4
+},
+"emotionalStability": 4.0,
+"personality_scores": {
+"communication": 4,
+"responsibility": 4,
+"collaboration": 4,
+"flexibility": 3,
+"emotionalStability": 4
+},
+"development_summary": {
+"strengths": [
+{
+"trait": "leadership",
+"label": "리더십",
+"score": 4
+},
+{
+"trait": "problemSolving",
+"label": "문제 해결력",
+"score": 4
+},
+{
+"trait": "implementation",
+"label": "구현 실행력",
+"score": 4
+},
+{
+"trait": "learningAbility",
+"label": "학습 성장성",
+"score": 4
+},
+{
+"trait": "planning",
+"label": "기획 정리력",
+"score": 4
+}
+],
+"risks": [],
+"summary": "강점: 리더십, 문제 해결력, 구현 실행력, 학습 성장성, 기획 정리력 / 리스크: 낮은 리스크 성향은 없습니다."
+},
+"personality_summary": {
+"strengths": [
+{
+"trait": "communication",
+"label": "소통",
+"score": 4
+},
+{
+"trait": "responsibility",
+"label": "책임감",
+"score": 4
+},
+{
+"trait": "collaboration",
+"label": "협업",
+"score": 4
+},
+{
+"trait": "emotionalStability",
+"label": "감정 안정성",
+"score": 4
+}
+],
+"risks": [],
+"summary": "강점: 소통, 책임감, 협업, 감정 안정성 / 리스크: 낮은 리스크 성향은 없습니다."
+},
+"matching_preferences": {
+"preferred_members": [],
+"wants_leader": true,
+"ignored_preferences": []
+},
+"response_reliability": "HIGH"
+},
+{
+"name": "박진욱",
+"role": "APP",
+"grade": "GRADE_2",
+"stack": [
+"React Native",
+"Kotlin",
+"Firebase",
+"WebSocket",
+"REST API"
+],
+"reason": "학생은 React Native, Kotlin, Firebase, WebSocket, REST API 등 다양한 스택을 보유하고 있으며, 팀 채팅 화면 UI 구현, WebSocket 메시지 수신 구조 테스트, Android 알림 테스트 기능 구현, 사용자 로그인 상태 유지 및 간단한 데이터 동기화 기능 구현 등 구체적인 프로젝트 경험을 가지고 있습니다. 그러나 모든 경험이 '간단한', '테스트', '구현' 수준에 머물러 있으며, 아키텍처 설계, 성능 개선, 운영/장애 대응, 복잡한 문제 해결 등 고급 구현 근거가 부족합니다. 따라서 기술 스택의 다양성은 있지만, 실제 구현 깊이와 복잡도가 낮아 '보통' 수준으로 평가합니다.",
+"user_id": null,
+"planning": 3.5,
+"strength": "다양한 모바일 및 백엔드 스택을 활용한 프로젝트 구현 경험, 팀 협업 및 커뮤니케이션 능력 우수, 문제 해결 및 구현 능력 높음",
+"weakness": "고급 아키텍처 설계, 성능 최적화, 운영/장애 대응, 복잡한 문제 해결 경험 부족, 고급 구현 근거(advanced_evidence_count)가 부족하여 '높음' 수준 도달 어려움",
+"experience": [
+"React Native로 팀 채팅 화면 UI를 구현하고 WebSocket 메시지 수신 구조를 테스트했습니다.",
+"Kotlin으로 Android 알림 테스트 기능을 구현하고 채팅 메시지 수신 시 로컬 알림이 뜨도록 실험했습니다.",
+"Firebase를 이용해 사용자 로그인 상태 유지와 간단한 데이터 동기화 기능을 구현했습니다."
 ],
 "leadership": 3.5,
-"suggestion": "데이터 파이프라인 구축 경험이 있는 백엔드 개발자, 모델 최적화 및 배포 경험이 있는 MLOps 엔지니어와 협업하면 시너지가 큽니다.",
+"suggestion": "React Native와 Kotlin을 활용한 모바일 앱 개발, Firebase 기반 백엔드 연동, WebSocket을 이용한 실시간 통신 기능을 필요로 하는 프로젝트에 적합. 특히 UI/UX 구현과 실시간 기능 구현에 강점을 보이므로, 프론트엔드/백엔드 통합 개발 역할을 맡을 수 있음.",
 "flexibility": 4.0,
 "skill_level": "보통",
-"stack_score": "Python: 5점\nLangChain: 6점\nRAG: 6점\nVector DB: 6점",
+"stack_score": "React Native: 4점\nKotlin: 4점\nFirebase: 4점\nWebSocket: 4점\nREST API: 4점",
 "wants_leader": false,
 "collaboration": 4.0,
-"communication": 4.2,
-"implementation": 4.0,
-"problemSolving": 4.1,
-"responsibility": 3.9,
-"learningAbility": 4.3,
+"communication": 4.0,
+"implementation": 4.5,
+"problemSolving": 4.0,
+"responsibility": 3.5,
+"analysis_status": "SUCCESS",
+"learningAbility": 4.0,
 "matching_traits": {
 "trait_average": 3.6,
 "leader_score": 3.3,
@@ -1652,7 +964,9 @@
 "score": 4
 }
 ],
-"defaulted_traits": []
+"defaulted_traits": [],
+"response_reliability": "HIGH",
+"response_reliability_weight": 1.0
 },
 "preferred_members": [],
 "development_scores": {
@@ -1662,7 +976,7 @@
 "learningAbility": 4,
 "planning": 3
 },
-"emotionalStability": 3.8,
+"emotionalStability": 3.5,
 "personality_scores": {
 "communication": 4,
 "responsibility": 3,
@@ -1716,526 +1030,46 @@
 "preferred_members": [],
 "wants_leader": false,
 "ignored_preferences": []
-}
+},
+"response_reliability": "HIGH"
 },
 {
-"name": "최도윤",
-"role": "DESIGN",
+"name": "김성현",
+"role": "AI",
 "grade": "GRADE_2",
 "stack": [
-"Figma",
-"UX Research",
-"Wireframe",
-"Design QA"
+"Python",
+"FastAPI",
+"LangGraph",
+"LangSmith",
+"Upstage API"
 ],
-"reason": "학생은 DESIGN 역할을 가지고 있으며, Figma, UX Research, Wireframe, Design QA 스택을 보유하고 있습니다. 경험으로는 사용자 인터뷰 결과를 기능 우선순위로 정리하고 핵심 화면 wireframe과 clickable prototype을 제작했으며, 개발 완료 화면을 디자인 시안과 비교해 여백, 버튼 크기, 텍스트 길이 문제를 QA한 경험이 있습니다. 이는 디자인 프로세스에서 사용자 중심 접근과 구현된 결과물에 대한 검증 능력을 보여줍니다. 그러나 기술 스택이 디자인 도구에 국한되어 있고, 구현이나 아키텍처 설계, 성능 개선, 운영/장애 대응 등 고급 개발 경험이 없습니다. 따라서 기술 숙련도 점수는 디자인 도구의 실제 사용 깊이에 따라 낮게 평가됩니다.",
+"reason": "학생은 LangGraph, LangSmith, Upstage API를 활용해 학생 분석, 팀 생성, 검증 로직을 설계 및 구현했으며, 실행 로그 추적, 팀 배정 결과 검증, 중복/누락/인원 차이/역할 쏠림 검사 등 고급 문제 해결 및 운영 경험을 보유하고 있습니다. 이는 아키텍처 설계, 성능 개선, 운영/장애 대응, 복잡한 문제 해결 근거가 명확하므로 skill_level을 '높음'으로 판정합니다.",
 "user_id": null,
-"planning": 4.3,
-"strength": "사용자 인터뷰 기반 기능 우선순위 정리 및 clickable prototype 제작 능력, 개발 완료 화면과의 QA를 통한 디자인-구현 간 일관성 검증 능력",
-"weakness": "구현, 아키텍처 설계, 성능 개선, 운영/장애 대응 등 고급 개발 경험이 부족하며, 디자인 외 기술 스택이 없어 개발자와의 협업 시 기술적 깊이가 제한적입니다.",
+"planning": 4.0,
+"strength": "LangGraph와 LangSmith를 활용한 복잡한 워크플로 설계 및 검증 로직 구현, 고급 문제 해결 및 운영 경험",
+"weakness": "emotionalStability 점수가 3.5로 다소 낮아 팀 내 갈등 관리 및 감정 조절 측면에서 보완이 필요",
 "experience": [
-"사용자 인터뷰 결과를 기능 우선순위로 정리하고 핵심 화면 wireframe과 clickable prototype을 제작했습니다.",
-"개발 완료 화면을 디자인 시안과 비교해 여백, 버튼 크기, 텍스트 길이 문제를 QA한 경험이 있습니다."
-],
-"leadership": 3.3,
-"suggestion": "UX/UI 디자이너, 프로토타이핑 전문가, 디자인 QA 담당자와 협업하면 시너지가 클 것입니다. 프론트엔드 개발자와 함께 디자인 시안을 구현하고 피드백을 주고받는 역할을 맡기면 좋습니다.",
-"flexibility": 4.4,
-"skill_level": "낮음",
-"stack_score": "Figma: 4점\nUX Research: 3점\nWireframe: 4점\nDesign QA: 4점",
-"wants_leader": false,
-"collaboration": 4.2,
-"communication": 4.1,
-"implementation": 3.9,
-"problemSolving": 3.7,
-"responsibility": 4.0,
-"learningAbility": 3.9,
-"matching_traits": {
-"trait_average": 3.5,
-"leader_score": 3.3,
-"low_traits": [],
-"high_traits": [
-{
-"trait": "communication",
-"label": "소통",
-"score": 4
-},
-{
-"trait": "responsibility",
-"label": "책임감",
-"score": 4
-},
-{
-"trait": "collaboration",
-"label": "협업",
-"score": 4
-},
-{
-"trait": "flexibility",
-"label": "유연성",
-"score": 4
-},
-{
-"trait": "planning",
-"label": "기획 정리력",
-"score": 4
-}
-],
-"defaulted_traits": []
-},
-"preferred_members": [],
-"development_scores": {
-"leadership": 3,
-"problemSolving": 3,
-"implementation": 3,
-"learningAbility": 3,
-"planning": 4
-},
-"emotionalStability": 3.9,
-"personality_scores": {
-"communication": 4,
-"responsibility": 4,
-"collaboration": 4,
-"flexibility": 4,
-"emotionalStability": 3
-},
-"development_summary": {
-"strengths": [
-{
-"trait": "planning",
-"label": "기획 정리력",
-"score": 4
-}
-],
-"risks": [],
-"summary": "강점: 기획 정리력 / 리스크: 낮은 리스크 성향은 없습니다."
-},
-"personality_summary": {
-"strengths": [
-{
-"trait": "communication",
-"label": "소통",
-"score": 4
-},
-{
-"trait": "responsibility",
-"label": "책임감",
-"score": 4
-},
-{
-"trait": "collaboration",
-"label": "협업",
-"score": 4
-},
-{
-"trait": "flexibility",
-"label": "유연성",
-"score": 4
-}
-],
-"risks": [],
-"summary": "강점: 소통, 책임감, 협업, 유연성 / 리스크: 낮은 리스크 성향은 없습니다."
-},
-"matching_preferences": {
-"preferred_members": [],
-"wants_leader": false,
-"ignored_preferences": []
-}
-},
-{
-"name": "윤지호",
-"role": "GAME",
-"grade": "GRADE_2",
-"stack": [
-"Unity",
-"C#",
-"Photon",
-"Game UI"
-],
-"reason": "학생은 Unity와 C#을 사용해 2D 협동 미니게임을 직접 설계하고 구현했으며, Photon을 이용해 방 생성, 입장, 플레이어 동기화 기능을 구현했습니다. 또한 게임 UI 상태와 네트워크 이벤트를 분리해 접속 끊김, 재입장, 결과 화면 전환 등 복잡한 상태 관리와 네트워크 이벤트 처리를 직접 수행했습니다. 이는 단순한 클론코딩이나 튜토리얼 수준을 넘어, 여러 기능이 결합된 프로젝트를 구조적으로 구현하고 주요 문제를 해결한 경험에 해당합니다. 따라서 skill_level은 '보통'으로 판정합니다.",
-"user_id": null,
-"planning": 3.5,
-"strength": "Unity와 C#을 활용한 2D 협동 게임 구현 능력, Photon을 이용한 실시간 네트워크 동기화 및 상태 관리, 접속 끊김 및 재입장 처리 등 실전적인 게임 개발 경험",
-"weakness": "아키텍처 설계나 성능 최적화, 운영/장애 대응 경험이 부족하며, 고급 문제 해결 및 테스트 자동화 경험이 제한적입니다. 또한 리더십 점수가 낮아 팀 리딩보다는 구현 및 협업 역할에 적합합니다.",
-"experience": [
-"Unity로 2D 협동 미니게임을 만들고 Photon을 이용해 방 생성, 입장, 플레이어 동기화 기능을 구현했습니다.",
-"게임 UI 상태와 네트워크 이벤트를 분리해 접속 끊김, 재입장, 결과 화면 전환을 처리했습니다."
-],
-"leadership": 3.4,
-"suggestion": "네트워크 기반 멀티플레이어 게임 개발, 실시간 동기화 및 상태 관리가 필요한 게임 프로젝트에서 핵심 개발자로 참여하면 좋습니다. 특히 Unity와 Photon을 활용한 게임 로직 및 UI 구현에 강점을 보일 수 있습니다.",
-"flexibility": 4.1,
-"skill_level": "보통",
-"stack_score": "Unity: 7점\nC#: 7점\nPhoton: 6점\nGame UI: 5점",
-"wants_leader": false,
-"collaboration": 3.7,
-"communication": 3.9,
-"implementation": 4.2,
-"problemSolving": 4.0,
-"responsibility": 3.9,
-"learningAbility": 4.0,
-"matching_traits": {
-"trait_average": 3.4,
-"leader_score": 3.3,
-"low_traits": [],
-"high_traits": [
-{
-"trait": "flexibility",
-"label": "유연성",
-"score": 4
-},
-{
-"trait": "problemSolving",
-"label": "문제 해결력",
-"score": 4
-},
-{
-"trait": "implementation",
-"label": "구현 실행력",
-"score": 4
-},
-{
-"trait": "learningAbility",
-"label": "학습 성장성",
-"score": 4
-}
-],
-"defaulted_traits": []
-},
-"preferred_members": [],
-"development_scores": {
-"leadership": 3,
-"problemSolving": 4,
-"implementation": 4,
-"learningAbility": 4,
-"planning": 3
-},
-"emotionalStability": 3.6,
-"personality_scores": {
-"communication": 3,
-"responsibility": 3,
-"collaboration": 3,
-"flexibility": 4,
-"emotionalStability": 3
-},
-"development_summary": {
-"strengths": [
-{
-"trait": "problemSolving",
-"label": "문제 해결력",
-"score": 4
-},
-{
-"trait": "implementation",
-"label": "구현 실행력",
-"score": 4
-},
-{
-"trait": "learningAbility",
-"label": "학습 성장성",
-"score": 4
-}
-],
-"risks": [],
-"summary": "강점: 문제 해결력, 구현 실행력, 학습 성장성 / 리스크: 낮은 리스크 성향은 없습니다."
-},
-"personality_summary": {
-"strengths": [
-{
-"trait": "flexibility",
-"label": "유연성",
-"score": 4
-}
-],
-"risks": [],
-"summary": "강점: 유연성 / 리스크: 낮은 리스크 성향은 없습니다."
-},
-"matching_preferences": {
-"preferred_members": [],
-"wants_leader": false,
-"ignored_preferences": []
-}
-},
-{
-"name": "강민재",
-"role": "BACKEND",
-"grade": "GRADE_2",
-"stack": [
-"NestJS",
-"TypeORM",
-"PostgreSQL",
-"Swagger"
-],
-"reason": "학생은 NestJS와 TypeORM을 활용해 REST API를 직접 설계하고 구현했으며, Swagger 문서화와 PostgreSQL 마이그레이션까지 수행한 경험이 있습니다. 또한 권한별 API 접근 제어와 에러 응답 포맷을 통일해 프론트엔드가 처리하기 쉬운 서버 구조를 만든 점에서 아키텍처 설계 및 구조화 능력이 확인됩니다. 이러한 경험은 단순한 클론코딩이나 튜토리얼 수준을 넘어, 여러 기능이 결합된 프로젝트를 독립적으로 구축한 것으로 판단됩니다. 따라서 skill_level은 '보통'으로 판정합니다.",
-"user_id": null,
-"planning": 3.6,
-"strength": "REST API 설계 및 구현, Swagger 문서화, TypeORM을 활용한 데이터베이스 마이그레이션, 권한 기반 API 접근 제어 및 에러 응답 포맷 통일 등 백엔드 핵심 역량을 고루 갖춘 점",
-"weakness": "프로젝트 전체 아키텍처 설계나 성능 최적화, 운영/장애 대응 경험이 부족해 고급 백엔드 역할(예: 시스템 설계, 대규모 트래픽 처리) 수행에는 한계가 있을 수 있습니다. 또한 배포 자동화나 CI/CD 파이프라인 구축 경험이 명시되지 않아 운영 측면에서의 깊이가 다소 제한적입니다.",
-"experience": [
-"NestJS와 TypeORM으로 REST API를 만들고 Swagger 문서, DTO 검증, PostgreSQL 마이그레이션을 적용했습니다.",
-"권한별 API 접근 제어와 에러 응답 포맷을 통일해 프론트엔드가 처리하기 쉬운 서버 구조를 만든 경험이 있습니다."
-],
-"leadership": 3.7,
-"suggestion": "프론트엔드와의 협업이 원활한 백엔드 개발자로서, 특히 API 설계 및 문서화, 인증/인가 로직 구현에 강점을 가진 학생과 매칭하면 시너지가 큽니다. 프론트엔드에서 React/Vue.js를 사용하는 학생이나, 데이터베이스 설계 및 최적화를 담당하는 학생과 협업하면 좋습니다.",
-"flexibility": 3.8,
-"skill_level": "보통",
-"stack_score": "NestJS: 7점\nTypeORM: 7점\nPostgreSQL: 6점\nSwagger: 5점",
-"wants_leader": false,
-"collaboration": 3.8,
-"communication": 3.9,
-"implementation": 4.5,
-"problemSolving": 4.3,
-"responsibility": 4.1,
-"learningAbility": 4.1,
-"matching_traits": {
-"trait_average": 3.4,
-"leader_score": 3.3,
-"low_traits": [],
-"high_traits": [
-{
-"trait": "responsibility",
-"label": "책임감",
-"score": 4
-},
-{
-"trait": "problemSolving",
-"label": "문제 해결력",
-"score": 4
-},
-{
-"trait": "implementation",
-"label": "구현 실행력",
-"score": 4
-},
-{
-"trait": "learningAbility",
-"label": "학습 성장성",
-"score": 4
-}
-],
-"defaulted_traits": []
-},
-"preferred_members": [],
-"development_scores": {
-"leadership": 3,
-"problemSolving": 4,
-"implementation": 4,
-"learningAbility": 4,
-"planning": 3
-},
-"emotionalStability": 3.6,
-"personality_scores": {
-"communication": 3,
-"responsibility": 4,
-"collaboration": 3,
-"flexibility": 3,
-"emotionalStability": 3
-},
-"development_summary": {
-"strengths": [
-{
-"trait": "problemSolving",
-"label": "문제 해결력",
-"score": 4
-},
-{
-"trait": "implementation",
-"label": "구현 실행력",
-"score": 4
-},
-{
-"trait": "learningAbility",
-"label": "학습 성장성",
-"score": 4
-}
-],
-"risks": [],
-"summary": "강점: 문제 해결력, 구현 실행력, 학습 성장성 / 리스크: 낮은 리스크 성향은 없습니다."
-},
-"personality_summary": {
-"strengths": [
-{
-"trait": "responsibility",
-"label": "책임감",
-"score": 4
-}
-],
-"risks": [],
-"summary": "강점: 책임감 / 리스크: 낮은 리스크 성향은 없습니다."
-},
-"matching_preferences": {
-"preferred_members": [],
-"wants_leader": false,
-"ignored_preferences": []
-}
-},
-{
-"name": "송하린",
-"role": "FRONTEND",
-"grade": "GRADE_2",
-"stack": [
-"Next.js",
-"React",
-"Zustand",
-"Tailwind CSS"
-],
-"reason": "Next.js와 React를 사용해 검색·필터 기능이 있는 상품 목록 화면을 구현하고 Zustand로 상태 관리, Tailwind CSS로 반응형 레이아웃과 skeleton loading, 빈 결과 화면 처리까지 직접 구현한 경험이 있습니다. 이는 단순 클론코딩이나 튜토리얼 수준을 넘어 여러 기능이 결합된 작은 프로젝트를 독립적으로 설계·구현한 사례로, '보통' 수준의 기술 숙련도에 해당합니다. 다만 아키텍처 설계, 성능 개선, 운영·장애 대응, 복잡한 문제 해결 등 고급 근거가 없으므로 '높음'은 부여하지 않았습니다.",
-"user_id": null,
-"planning": 3.7,
-"strength": "검색·필터 기능이 있는 상품 목록 화면을 Zustand로 상태 관리하며 구현했고, Tailwind CSS로 반응형 레이아웃과 skeleton loading, 빈 결과 화면 처리까지 직접 구현한 점이 강점입니다.",
-"weakness": "고급 아키텍처 설계나 성능 최적화, 운영·장애 대응 경험이 부족합니다. 또한 리더십 점수가 낮아 팀 리딩 역할은 어려울 수 있습니다.",
-"experience": [
-"Next.js로 검색과 필터가 있는 상품 목록 화면을 만들고 Zustand로 필터 상태를 관리했습니다.",
-"Tailwind CSS로 반응형 카드 레이아웃을 구현하고 skeleton loading과 빈 결과 화면을 처리했습니다."
-],
-"leadership": 3.2,
-"suggestion": "백엔드 API와 연동된 프론트엔드 프로젝트를 함께 진행할 수 있는 백엔드 개발자나, 상태 관리와 UI 최적화를 담당하는 동료와 협업하면 시너지가 클 것입니다.",
-"flexibility": 4.2,
-"skill_level": "보통",
-"stack_score": "Next.js: 5점\nReact: 5점\nZustand: 4점\nTailwind CSS: 4점",
-"wants_leader": false,
-"collaboration": 4.1,
-"communication": 4.3,
-"implementation": 4.0,
-"problemSolving": 3.9,
-"responsibility": 4.0,
-"learningAbility": 4.1,
-"matching_traits": {
-"trait_average": 3.6,
-"leader_score": 3.0,
-"low_traits": [],
-"high_traits": [
-{
-"trait": "communication",
-"label": "소통",
-"score": 4
-},
-{
-"trait": "responsibility",
-"label": "책임감",
-"score": 4
-},
-{
-"trait": "collaboration",
-"label": "협업",
-"score": 4
-},
-{
-"trait": "flexibility",
-"label": "유연성",
-"score": 4
-},
-{
-"trait": "implementation",
-"label": "구현 실행력",
-"score": 4
-},
-{
-"trait": "learningAbility",
-"label": "학습 성장성",
-"score": 4
-}
-],
-"defaulted_traits": []
-},
-"preferred_members": [],
-"development_scores": {
-"leadership": 3,
-"problemSolving": 3,
-"implementation": 4,
-"learningAbility": 4,
-"planning": 3
-},
-"emotionalStability": 3.8,
-"personality_scores": {
-"communication": 4,
-"responsibility": 4,
-"collaboration": 4,
-"flexibility": 4,
-"emotionalStability": 3
-},
-"development_summary": {
-"strengths": [
-{
-"trait": "implementation",
-"label": "구현 실행력",
-"score": 4
-},
-{
-"trait": "learningAbility",
-"label": "학습 성장성",
-"score": 4
-}
-],
-"risks": [],
-"summary": "강점: 구현 실행력, 학습 성장성 / 리스크: 낮은 리스크 성향은 없습니다."
-},
-"personality_summary": {
-"strengths": [
-{
-"trait": "communication",
-"label": "소통",
-"score": 4
-},
-{
-"trait": "responsibility",
-"label": "책임감",
-"score": 4
-},
-{
-"trait": "collaboration",
-"label": "협업",
-"score": 4
-},
-{
-"trait": "flexibility",
-"label": "유연성",
-"score": 4
-}
-],
-"risks": [],
-"summary": "강점: 소통, 책임감, 협업, 유연성 / 리스크: 낮은 리스크 성향은 없습니다."
-},
-"matching_preferences": {
-"preferred_members": [],
-"wants_leader": false,
-"ignored_preferences": [
-"stu2307 선호는 분석 데이터에 없는 학생이라 제외했습니다."
-]
-}
-},
-{
-"name": "배준호",
-"role": "FULLSTACK",
-"grade": "GRADE_2",
-"stack": [
-"Next.js",
-"Spring Boot",
-"Docker",
-"MySQL"
-],
-"reason": "배준호는 Next.js와 Spring Boot를 함께 사용해 로그인 후 사용자별 데이터 조회 흐름을 직접 연결한 경험이 있습니다. 이는 프론트와 백엔드를 통합한 전체 시스템 설계 및 구현 능력을 보여줍니다. 또한 Docker로 로컬 실행 환경을 통일하고 MySQL 스키마 변경이 화면에 미치는 영향을 확인하며 개발했다는 점에서 배포, 데이터베이스 연동, 상태 관리 등 실전 요소를 포함한 프로젝트 경험이 있습니다. 이러한 경험은 여러 기능이 결합된 프로젝트를 구조적으로 구현하고 주요 문제를 해결한 수준에 해당하므로 '보통'으로 판정합니다. '높음' 판정을 위해서는 아키텍처 설계, 성능 개선, 운영/장애 대응, 복잡한 문제 해결 근거가 추가로 필요합니다.",
-"user_id": null,
-"planning": 4.2,
-"strength": "프론트와 백엔드를 통합한 전체 시스템 설계 및 구현 능력, Docker와 MySQL을 활용한 실전 개발 경험",
-"weakness": "고급 아키텍처 설계, 성능 최적화, 운영/장애 대응 경험이 부족합니다. 복잡한 문제 해결이나 대규모 시스템 설계 경험이 추가로 필요합니다.",
-"experience": [
-"Next.js 프론트와 Spring Boot 백엔드를 함께 구성해 로그인 후 사용자별 데이터 조회 흐름을 직접 연결했습니다.",
-"Docker로 로컬 실행 환경을 통일하고 MySQL 스키마 변경이 화면에 미치는 영향을 확인하며 개발했습니다."
+"LangGraph 기반으로 학생 분석, 1차 팀 생성, LLM 보정, 검증 단계가 이어지는 워크플로를 설계했습니다.",
+"LangSmith로 실행 로그를 확인하며 어떤 단계에서 팀 배정 결과가 바뀌는지 추적했습니다.",
+"팀 생성 결과에서 학생 중복, 누락, 팀 인원 차이, 역할 쏠림을 검사하는 검증 로직을 작성했습니다."
 ],
 "leadership": 4.0,
-"suggestion": "프론트엔드에서 React/Next.js를, 백엔드에서 Java/Spring Boot를 사용하는 팀원과 협업하면 시너지가 큽니다. Docker와 MySQL을 활용한 배포 및 데이터베이스 연동 경험이 있으므로, 인프라/배포 담당자와도 잘 어울릴 수 있습니다.",
-"flexibility": 3.9,
-"skill_level": "보통",
-"stack_score": "Next.js: 5점\nSpring Boot: 5점\nDocker: 4점\nMySQL: 4점",
+"suggestion": "데이터 파이프라인 구축, AI 기반 팀 매칭 시스템 고도화, 대규모 모델 배포 및 모니터링 담당",
+"flexibility": 4.5,
+"skill_level": "높음",
+"stack_score": "Python: 5점\nFastAPI: 6점\nLangGraph: 8점\nLangSmith: 7점\nUpstage API: 5점",
 "wants_leader": true,
 "collaboration": 4.0,
 "communication": 4.0,
-"implementation": 3.9,
-"problemSolving": 3.8,
-"responsibility": 4.3,
-"learningAbility": 4.0,
+"implementation": 4.0,
+"problemSolving": 4.5,
+"responsibility": 4.0,
+"analysis_status": "SUCCESS",
+"learningAbility": 4.5,
 "matching_traits": {
-"trait_average": 3.6,
-"leader_score": 3.7,
+"trait_average": 3.9,
+"leader_score": 4.0,
 "low_traits": [],
 "high_traits": [
 {
@@ -2251,6 +1085,11 @@
 {
 "trait": "collaboration",
 "label": "협업",
+"score": 4
+},
+{
+"trait": "flexibility",
+"label": "유연성",
 "score": 4
 },
 {
@@ -2259,6 +1098,16 @@
 "score": 4
 },
 {
+"trait": "problemSolving",
+"label": "문제 해결력",
+"score": 4
+},
+{
+"trait": "implementation",
+"label": "구현 실행력",
+"score": 4
+},
+{
 "trait": "learningAbility",
 "label": "학습 성장성",
 "score": 4
@@ -2269,22 +1118,24 @@
 "score": 4
 }
 ],
-"defaulted_traits": []
+"defaulted_traits": [],
+"response_reliability": "HIGH",
+"response_reliability_weight": 1.0
 },
 "preferred_members": [],
 "development_scores": {
 "leadership": 4,
-"problemSolving": 3,
-"implementation": 3,
+"problemSolving": 4,
+"implementation": 4,
 "learningAbility": 4,
 "planning": 4
 },
-"emotionalStability": 3.7,
+"emotionalStability": 3.5,
 "personality_scores": {
 "communication": 4,
 "responsibility": 4,
 "collaboration": 4,
-"flexibility": 3,
+"flexibility": 4,
 "emotionalStability": 3
 },
 "development_summary": {
@@ -2292,6 +1143,16 @@
 {
 "trait": "leadership",
 "label": "리더십",
+"score": 4
+},
+{
+"trait": "problemSolving",
+"label": "문제 해결력",
+"score": 4
+},
+{
+"trait": "implementation",
+"label": "구현 실행력",
 "score": 4
 },
 {
@@ -2306,7 +1167,7 @@
 }
 ],
 "risks": [],
-"summary": "강점: 리더십, 학습 성장성, 기획 정리력 / 리스크: 낮은 리스크 성향은 없습니다."
+"summary": "강점: 리더십, 문제 해결력, 구현 실행력, 학습 성장성, 기획 정리력 / 리스크: 낮은 리스크 성향은 없습니다."
 },
 "personality_summary": {
 "strengths": [
@@ -2324,51 +1185,60 @@
 "trait": "collaboration",
 "label": "협업",
 "score": 4
+},
+{
+"trait": "flexibility",
+"label": "유연성",
+"score": 4
 }
 ],
 "risks": [],
-"summary": "강점: 소통, 책임감, 협업 / 리스크: 낮은 리스크 성향은 없습니다."
+"summary": "강점: 소통, 책임감, 협업, 유연성 / 리스크: 낮은 리스크 성향은 없습니다."
 },
 "matching_preferences": {
 "preferred_members": [],
 "wants_leader": true,
 "ignored_preferences": []
-}
+},
+"response_reliability": "HIGH"
 },
 {
-"name": "홍다은",
-"role": "APP",
+"name": "허재원",
+"role": "FRONTEND",
 "grade": "GRADE_2",
 "stack": [
-"SwiftUI",
-"iOS",
-"CoreData",
-"REST API"
+"React",
+"JavaScript",
+"React Router",
+"Axios",
+"Zustand"
 ],
-"reason": "학생은 SwiftUI와 iOS 개발을 기반으로 일정 관리 화면을 구현하고 CoreData와 REST API 연동을 통해 데이터 저장 및 동기화를 수행했습니다. MVVM 구조로 View와 API 로직을 분리해 테스트와 수정이 용이하도록 구조화했으며, 로딩 상태 처리까지 구현했습니다. 이는 여러 기능이 결합된 프로젝트를 독립적으로 설계하고 구현한 사례로, 아키텍처 설계, 상태 관리, API 연동, 데이터 처리, 로딩 상태 관리 등 구체적인 구현 근거가 있습니다. 따라서 skill_level은 '보통'으로 판정합니다.",
+"reason": "학생은 React, JavaScript, React Router, Axios, Zustand를 사용한 경험이 있으며, 라우팅 구성, 전역 상태 관리, API 연동, CRUD 기능 구현 등 구체적인 구현 근거가 있습니다. 그러나 아키텍처 설계, 성능 개선, 운영/장애 대응, 복잡한 문제 해결 등 고급 수준의 경험은 명시적으로 드러나지 않습니다. 따라서 '보통' 수준으로 평가합니다.",
 "user_id": null,
-"planning": 3.5,
-"strength": "SwiftUI와 MVVM을 활용한 구조화된 iOS 앱 개발 능력, CoreData와 REST API 연동을 통한 데이터 관리 및 동기화 구현, 로딩 상태 처리와 테스트 용이성 확보",
-"weakness": "고급 아키텍처 설계나 대규모 시스템 운영 경험이 부족하며, 복잡한 문제 해결 및 성능 개선 사례가 제한적입니다. 또한, 리더십 점수가 낮아 팀 리딩 역할보다는 구현 및 기술 지원에 적합합니다.",
+"planning": 4.5,
+"strength": "React와 JavaScript를 활용한 프론트엔드 구현 능력, 라우팅 및 전역 상태 관리, API 연동 및 CRUD 기능 구현 경험",
+"weakness": "고급 아키텍처 설계, 성능 개선, 운영/장애 대응, 복잡한 문제 해결 경험이 부족합니다. 또한, 협업 경험이 collaboration 4.5로 높지만, 고급 프로젝트 경험이 부족하여 skill_level을 '높음'으로 올리기에는 근거가 부족합니다.",
 "experience": [
-"SwiftUI로 iOS 일정 관리 화면을 만들고 CoreData 임시 저장, REST API 동기화, 로딩 상태 처리를 구현했습니다.",
-"MVVM 구조로 View와 API 호출 로직을 분리해 화면 테스트와 기능 수정이 쉽도록 정리한 경험이 있습니다."
+"React Router로 학생/관리자 페이지 라우팅을 구성하고 로그인 권한에 따라 다른 대시보드로 이동하도록 구현했습니다.",
+"Zustand로 로그인 사용자 정보와 accessToken을 전역 상태로 관리하고 Axios 인터셉터에서 토큰을 자동으로 붙이도록 구성했습니다.",
+"마크다운 에디터를 적용한 공지 작성 페이지를 구현하고 작성, 수정, 삭제 API와 연결했습니다."
 ],
-"leadership": 3.4,
-"suggestion": "아키텍처 설계와 성능 최적화에 강점을 가진 백엔드 개발자 또는 데이터 엔지니어와 협업하면 시너지가 클 것입니다. 또한, 복잡한 상태 관리와 API 연동이 필요한 프로젝트에서 핵심 역할을 맡을 수 있습니다.",
+"leadership": 4.0,
+"suggestion": "아키텍처 설계나 성능 최적화가 필요한 프론트엔드 역할, 또는 상태 관리와 API 연동을 담당하는 프론트엔드 개발자와 협업하면 좋습니다. 특히, 백엔드와의 협업이 필요한 프로젝트에서 강점을 발휘할 수 있습니다.",
 "flexibility": 4.0,
 "skill_level": "보통",
-"stack_score": "SwiftUI: 7점\niOS: 7점\nCoreData: 6점\nREST API: 6점",
-"wants_leader": false,
-"collaboration": 3.9,
-"communication": 4.1,
-"implementation": 4.1,
+"stack_score": "React: 6점\nJavaScript: 4점\nReact Router: 5점\nAxios: 5점\nZustand: 5점",
+"wants_leader": true,
+"collaboration": 4.5,
+"communication": 4.0,
+"implementation": 4.5,
 "problemSolving": 4.0,
-"responsibility": 3.9,
-"learningAbility": 3.9,
+"responsibility": 4.5,
+"analysis_status": "SUCCESS",
+"learningAbility": 4.0,
 "matching_traits": {
-"trait_average": 3.4,
-"leader_score": 3.3,
+"trait_average": 4.0,
+"leader_score": 4.0,
 "low_traits": [],
 "high_traits": [
 {
@@ -2377,11 +1247,31 @@
 "score": 4
 },
 {
+"trait": "responsibility",
+"label": "책임감",
+"score": 4
+},
+{
+"trait": "collaboration",
+"label": "협업",
+"score": 4
+},
+{
 "trait": "flexibility",
 "label": "유연성",
 "score": 4
 },
 {
+"trait": "emotionalStability",
+"label": "감정 안정성",
+"score": 4
+},
+{
+"trait": "leadership",
+"label": "리더십",
+"score": 4
+},
+{
 "trait": "problemSolving",
 "label": "문제 해결력",
 "score": 4
@@ -2390,29 +1280,46 @@
 "trait": "implementation",
 "label": "구현 실행력",
 "score": 4
+},
+{
+"trait": "learningAbility",
+"label": "학습 성장성",
+"score": 4
+},
+{
+"trait": "planning",
+"label": "기획 정리력",
+"score": 4
 }
 ],
-"defaulted_traits": []
+"defaulted_traits": [],
+"response_reliability": "HIGH",
+"response_reliability_weight": 1.0
 },
 "preferred_members": [],
 "development_scores": {
-"leadership": 3,
+"leadership": 4,
 "problemSolving": 4,
 "implementation": 4,
-"learningAbility": 3,
-"planning": 3
+"learningAbility": 4,
+"planning": 4
 },
-"emotionalStability": 3.8,
+"emotionalStability": 4.0,
 "personality_scores": {
 "communication": 4,
-"responsibility": 3,
-"collaboration": 3,
+"responsibility": 4,
+"collaboration": 4,
 "flexibility": 4,
-"emotionalStability": 3
+"emotionalStability": 4
 },
 "development_summary": {
 "strengths": [
 {
+"trait": "leadership",
+"label": "리더십",
+"score": 4
+},
+{
 "trait": "problemSolving",
 "label": "문제 해결력",
 "score": 4
@@ -2421,10 +1328,20 @@
 "trait": "implementation",
 "label": "구현 실행력",
 "score": 4
+},
+{
+"trait": "learningAbility",
+"label": "학습 성장성",
+"score": 4
+},
+{
+"trait": "planning",
+"label": "기획 정리력",
+"score": 4
 }
 ],
 "risks": [],
-"summary": "강점: 문제 해결력, 구현 실행력 / 리스크: 낮은 리스크 성향은 없습니다."
+"summary": "강점: 리더십, 문제 해결력, 구현 실행력, 학습 성장성, 기획 정리력 / 리스크: 낮은 리스크 성향은 없습니다."
 },
 "personality_summary": {
 "strengths": [
@@ -2434,19 +1351,35 @@
 "score": 4
 },
 {
+"trait": "responsibility",
+"label": "책임감",
+"score": 4
+},
+{
+"trait": "collaboration",
+"label": "협업",
+"score": 4
+},
+{
 "trait": "flexibility",
 "label": "유연성",
+"score": 4
+},
+{
+"trait": "emotionalStability",
+"label": "감정 안정성",
 "score": 4
 }
 ],
 "risks": [],
-"summary": "강점: 소통, 유연성 / 리스크: 낮은 리스크 성향은 없습니다."
+"summary": "강점: 소통, 책임감, 협업, 유연성, 감정 안정성 / 리스크: 낮은 리스크 성향은 없습니다."
 },
 "matching_preferences": {
 "preferred_members": [],
-"wants_leader": false,
+"wants_leader": true,
 "ignored_preferences": []
-}
+},
+"response_reliability": "HIGH"
 }
 ],
 "final_result": {
@@ -2454,16 +1387,16 @@
 {
 "team_name": "팀 1",
 "members": [
-"윤지호",
-"나현우",
-"문태준",
-"배준호",
-"김아린"
+"김성현",
+"위재성",
+"이송민",
+"장준민",
+"박진욱"
 ],
-"total_score": 120.05,
+"total_score": 127.0,
 "role_groups": [
 {
-"role_group": "game",
+"role_group": "ai_data",
 "count": 1
 },
 {
@@ -2471,53 +1404,51 @@
 "count": 1
 },
 {
-"role_group": "app",
-"count": 1
-},
-{
-"role_group": "fullstack",
-"count": 1
-},
-{
 "role_group": "design",
 "count": 1
-}
-],
-"leader": "나현우",
-"reason_cards": [
-{
-"title": "선호 관계와 역할 균형을 함께 살린 팀",
-"description": "윤지호의 Unity 기반 멀티플레이 구현 역량을 같은 팀에 배치해 게임 요소 개발 부담을 줄였습니다. 문태준의 Flutter 앱 구현 역량과 함께 초반 요구사항 확인과 화면 흐름 점검을 빠르게 시작하도록 배치했습니다. 이를 통해 통합 동작을 조기에 검증해 사용자 경험을 구체화하는 데 도움을 주고자 배치했습니다."
 },
 {
-"title": "백엔드와 앱 화면 연결을 매끄럽게 맞춘 팀",
-"description": "나현우의 인증·인가 설계 경험을 바탕으로 서버 기능과 문태준의 앱 화면을 직접 연결하도록 배치했습니다. 앱에서 요구하는 인증 흐름과 오류 처리 동작을 초반에 함께 점검해 구현 착오를 줄이기 위해 같은 팀에 배치했습니다. 초기 통신 흐름을 조기에 확인해 개발 속도 저하를 방지하려고 배치했습니다."
+"role_group": "frontend",
+"count": 1
+},
+{
+"role_group": "app",
+"count": 1
 }
 ],
-"reason": "윤지호의 Unity 기반 멀티플레이 구현 역량을 같은 팀에 배치해 게임 요소 개발 부담을 줄였습니다. 문태준의 Flutter 앱 구현 역량과 함께 초반 요구사항 확인과 화면 흐름 점검을 빠르게 시작하도록 배치했습니다. 이를 통해 통합 동작을 조기에 검증해 사용자 경험을 구체화하는 데 도움을 주고자 배치했습니다. 나현우의 인증·인가 설계 경험을 바탕으로 서버 기능과 문태준의 앱 화면을 직접 연결하도록 배치했습니다. 앱에서 요구하는 인증 흐름과 오류 처리 동작을 초반에 함께 점검해 구현 착오를 줄이기 위해 같은 팀에 배치했습니다. 초기 통신 흐름을 조기에 확인해 개발 속도 저하를 방지하려고 배치했습니다.",
-"leader_reason": "리더십 4점, 기획 정리력 3점, 문제 해결력 4점을 기준으로 leader_score 3.7점입니다.",
+"leader": "김성현",
+"reason_cards": [
+{
+"title": "팀장 희망을 반영한 운영 중심 팀",
+"description": "김성현의 팀장 희망을 반영해 초반 일정 조정과 의사결정 창구를 명확히 했습니다. 김성현의 분석 설계 역량을 바탕으로 장준민과 함께 우선순위를 빠르게 정해 초기 요구사항 정리와 화면 흐름 조율을 앞당기도록 구성했습니다. 초기 의사결정 창구를 분명히 해 개발 초반 혼선을 줄이고 일정 가시성을 확보하는 데 중점을 뒀습니다."
+},
+{
+"title": "백엔드·프론트 연동으로 구현 흐름을 맞춘 팀",
+"description": "위재성의 백엔드 구현 역량을 장준민의 프론트 구현 역량과 직접 연결해 API 명세와 화면 데이터 흐름을 초반부터 맞추도록 배치했습니다. 이 배치는 기능 개발 과정에서 불필요한 재작업을 줄이고 화면 반영 순서를 명확히 하는 데 도움이 됩니다. 초기 통신 규약과 예외 처리 기준을 함께 논의하도록 설계해 개발 중간 단계에서 발생할 수 있는 재작업을 사전에 줄였습니다."
+}
+],
+"reason": "김성현의 팀장 희망을 반영해 초반 일정 조정과 의사결정 창구를 명확히 했습니다. 김성현의 분석 설계 역량을 바탕으로 장준민과 함께 우선순위를 빠르게 정해 초기 요구사항 정리와 화면 흐름 조율을 앞당기도록 구성했습니다. 초기 의사결정 창구를 분명히 해 개발 초반 혼선을 줄이고 일정 가시성을 확보하는 데 중점을 뒀습니다. 위재성의 백엔드 구현 역량을 장준민의 프론트 구현 역량과 직접 연결해 API 명세와 화면 데이터 흐름을 초반부터 맞추도록 배치했습니다. 이 배치는 기능 개발 과정에서 불필요한 재작업을 줄이고 화면 반영 순서를 명확히 하는 데 도움이 됩니다. 초기 통신 규약과 예외 처리 기준을 함께 논의하도록 설계해 개발 중간 단계에서 발생할 수 있는 재작업을 사전에 줄였습니다.",
+"leader_reason": "리더십 4점, 기획 정리력 4점, 문제 해결력 4점을 기준으로 leader_score 4.0점입니다.",
 "personality_averages": {
-"communication": 3.6,
+"communication": 3.8,
 "responsibility": 3.8,
-"collaboration": 3.6,
+"collaboration": 4.0,
 "flexibility": 3.6,
-"emotionalStability": 3.0
+"emotionalStability": 3.4
 },
 "development_averages": {
 "leadership": 3.4,
-"problemSolving": 3.6,
-"implementation": 3.6,
-"learningAbility": 3.8,
-"planning": 3.4
+"problemSolving": 3.8,
+"implementation": 3.8,
+"learningAbility": 4.0,
+"planning": 3.6
 },
-"trait_risks": [
-"leader_score 4.0 이상 팀장 후보가 없습니다."
-],
+"trait_risks": [],
 "preference_notes": [],
 "matching_evidence": {
 "role_distribution": [
 {
-"role": "게임",
+"role": "AI",
 "count": 1
 },
 {
@@ -2525,15 +1456,15 @@
 "count": 1
 },
 {
-"role": "앱",
-"count": 1
-},
-{
-"role": "풀스택",
-"count": 1
-},
-{
 "role": "디자인",
+"count": 1
+},
+{
+"role": "프론트엔드",
+"count": 1
+},
+{
+"role": "앱",
 "count": 1
 }
 ],
@@ -2544,372 +1475,79 @@
 "unmatched_count": 0
 },
 "leader_selection": {
-"leader": "나현우",
+"leader": "김성현",
 "reason": "wants_leader",
 "candidate_names": [
-"나현우",
-"배준호"
+"김성현",
+"장준민"
 ]
 },
 "key_placements": [
 {
-"student": "나현우",
+"student": "김성현",
 "reason_type": "leader_preference",
 "reason": "팀장 희망이 반영되어 일정 정리와 의사결정 중심 역할을 맡기 좋습니다."
 },
 {
-"student": "윤지호",
+"student": "위재성",
 "reason_type": "role_balance",
-"reason": "게임 역할을 맡아 팀의 구현 범위를 보완합니다."
+"reason": "백엔드 역할을 맡아 팀의 구현 범위를 보완합니다."
 },
 {
-"student": "문태준",
+"student": "이송민",
 "reason_type": "role_balance",
-"reason": "앱 역할을 맡아 팀의 구현 범위를 보완합니다."
+"reason": "디자인 역할을 맡아 팀의 구현 범위를 보완합니다."
 }
 ],
 "implementation_connections": [
 {
-"source": "나현우",
+"source": "위재성",
 "source_role": "백엔드",
-"target": "문태준",
+"target": "장준민",
+"target_role": "프론트엔드",
+"reason": "API와 화면 연동 흐름을 함께 맞출 수 있습니다."
+},
+{
+"source": "위재성",
+"source_role": "백엔드",
+"target": "박진욱",
 "target_role": "앱",
 "reason": "서버 기능을 앱 화면과 안정적으로 연결할 수 있습니다."
 },
 {
-"source": "김아린",
-"source_role": "디자인",
-"target": "문태준",
-"target_role": "앱",
-"reason": "모바일 사용 흐름과 앱 화면 구현을 함께 맞추기 좋습니다."
+"source": "김성현",
+"source_role": "AI",
+"target": "위재성",
+"target_role": "백엔드",
+"reason": "분석 결과를 API와 저장 구조로 연결하기 좋습니다."
 },
 {
-"source": "배준호",
-"source_role": "풀스택",
-"target": "나현우",
-"target_role": "백엔드",
-"reason": "풀스택 경험을 서버 구조와 화면 요구사항 사이의 조율에 활용할 수 있습니다."
+"source": "김성현",
+"source_role": "AI",
+"target": "장준민",
+"target_role": "프론트엔드",
+"reason": "분석 결과를 사용자가 이해할 수 있는 화면으로 풀어낼 수 있습니다."
 }
 ],
-"risks": [
-"leader_score 4.0 이상 팀장 후보가 없습니다."
-],
+"risks": [],
 "team_notes": [],
-"leader_reason": "리더십 4점, 기획 정리력 3점, 문제 해결력 4점을 기준으로 leader_score 3.7점입니다."
+"leader_reason": "리더십 4점, 기획 정리력 4점, 문제 해결력 4점을 기준으로 leader_score 4.0점입니다."
 },
-"strengths": "팀장 희망을 표시한 나현우를 중심으로 일정 정리와 의사결정 중심 역할을 맡기기 좋은 구성입니다. 나현우의 인증·배치 운영 경험과 문태준의 Flutter 앱 구현 능력이 만나 서버-앱 연동을 안정적으로 검증하고 사용자 흐름을 빠르게 확인할 수 있는 결과를 만들 수 있습니다.",
-"weaknesses": "인증과 배치 운영 업무가 나현우에게 집중되어 백엔드 관련 업무 부담이 한쪽으로 쏠릴 가능성이 있습니다. 초반에 배준호와 함께 API 명세와 배포 환경을 우선 정리해 역할을 분담하고, 통합 테스트를 빠르게 돌려 백엔드 연동 지연을 줄이는 방식으로 보완하면 좋습니다."
+"strengths": "김성현의 팀장 희망이 반영되어 일정 정리와 의사결정 중심 역할을 맡기 좋습니다. 김성현의 LangGraph·LangSmith 기반 워크플로 설계 능력과 위재성의 Spring Boot 기반 API 설계 능력이 만나 분석 결과를 안정적으로 API로 제공하고 데이터 저장 구조까지 연결하는 결과를 만들 수 있습니다.",
+"weaknesses": "백엔드 구현을 책임질 위재성이 한 명이라 API 설계와 데이터 저장 흐름에 부담이 쏠릴 가능성이 있습니다. 초반에는 인증이나 부가 기능보다 핵심 API 명세와 데이터 모델을 먼저 정리해 장준민과 박진욱의 프론트엔드·앱 연동을 미리 검증하는 방식으로 보완하는 것이 필요합니다."
 },
 {
 "team_name": "팀 2",
 "members": [
-"노시현",
-"박서윤",
-"송하린",
-"이다솜",
-"최도윤"
+"허재원",
+"양원우",
+"김세찬",
+"노지완"
 ],
-"total_score": 113.07,
+"total_score": 97.18,
 "role_groups": [
-{
-"role_group": "fullstack",
-"count": 1
-},
-{
-"role_group": "ai_data",
-"count": 1
-},
 {
 "role_group": "frontend",
-"count": 1
-},
-{
-"role_group": "design",
-"count": 2
-}
-],
-"leader": "노시현",
-"reason_cards": [
-{
-"title": "AI 결과를 서비스 기능으로 연결하기 좋은 팀",
-"description": "박서윤의 문서 검색 기반 Q&A 설계 경험을 같은 팀에 두어 AI 결과를 사용자가 이해할 수 있는 형태로 정리하기 쉽게 배치했습니다. 송하린의 화면 구성 능력과 결합해 검색 결과와 답변 근거를 빠르게 화면에 반영하도록 배치했습니다. 초반에 화면과 모델 출력 형식을 함께 검증해 서비스 흐름을 명확히 하려는 의도로 배치했습니다."
-},
-{
-"title": "풀스택 중심으로 초기 구현 범위를 보완한 팀",
-"description": "노시현의 프론트·백엔드 연동 경험을 바탕으로 API 설계와 상태 관리를 초반부터 조율하도록 배치했습니다. 송하린의 프론트 구현 역량과 함께 화면-API 간 인터페이스를 조기에 합의해 개발 초기 커뮤니케이션 비용을 줄이기 위해 배치했습니다. 이를 통해 기능 우선순위와 데이터 흐름을 빠르게 정리할 수 있게 배치했습니다."
-}
-],
-"reason": "박서윤의 문서 검색 기반 Q&A 설계 경험을 같은 팀에 두어 AI 결과를 사용자가 이해할 수 있는 형태로 정리하기 쉽게 배치했습니다. 송하린의 화면 구성 능력과 결합해 검색 결과와 답변 근거를 빠르게 화면에 반영하도록 배치했습니다. 초반에 화면과 모델 출력 형식을 함께 검증해 서비스 흐름을 명확히 하려는 의도로 배치했습니다. 노시현의 프론트·백엔드 연동 경험을 바탕으로 API 설계와 상태 관리를 초반부터 조율하도록 배치했습니다. 송하린의 프론트 구현 역량과 함께 화면-API 간 인터페이스를 조기에 합의해 개발 초기 커뮤니케이션 비용을 줄이기 위해 배치했습니다. 이를 통해 기능 우선순위와 데이터 흐름을 빠르게 정리할 수 있게 배치했습니다.",
-"leader_reason": "리더십 3점, 기획 정리력 4점, 문제 해결력 4점을 기준으로 leader_score 3.6점입니다.",
-"personality_averages": {
-"communication": 4.0,
-"responsibility": 3.8,
-"collaboration": 3.8,
-"flexibility": 4.0,
-"emotionalStability": 3.0
-},
-"development_averages": {
-"leadership": 3.0,
-"problemSolving": 3.4,
-"implementation": 3.6,
-"learningAbility": 3.6,
-"planning": 3.6
-},
-"trait_risks": [
-"leader_score 4.0 이상 팀장 후보가 없습니다."
-],
-"preference_notes": [],
-"matching_evidence": {
-"role_distribution": [
-{
-"role": "풀스택",
-"count": 1
-},
-{
-"role": "AI",
-"count": 1
-},
-{
-"role": "프론트엔드",
-"count": 1
-},
-{
-"role": "디자인",
-"count": 2
-}
-],
-"preference": {
-"matched": [],
-"unmatched": [],
-"matched_count": 0,
-"unmatched_count": 0
-},
-"leader_selection": {
-"leader": "노시현",
-"reason": "leader_score",
-"candidate_names": []
-},
-"key_placements": [
-{
-"student": "노시현",
-"reason_type": "role_balance",
-"reason": "풀스택 역할을 맡아 팀의 구현 범위를 보완합니다."
-},
-{
-"student": "박서윤",
-"reason_type": "role_balance",
-"reason": "AI 역할을 맡아 팀의 구현 범위를 보완합니다."
-},
-{
-"student": "송하린",
-"reason_type": "role_balance",
-"reason": "프론트엔드 역할을 맡아 팀의 구현 범위를 보완합니다."
-}
-],
-"implementation_connections": [
-{
-"source": "박서윤",
-"source_role": "AI",
-"target": "송하린",
-"target_role": "프론트엔드",
-"reason": "분석 결과를 사용자가 이해할 수 있는 화면으로 풀어낼 수 있습니다."
-},
-{
-"source": "이다솜",
-"source_role": "디자인",
-"target": "송하린",
-"target_role": "프론트엔드",
-"reason": "사용자 흐름과 웹 화면 구현을 함께 다듬기 좋습니다."
-},
-{
-"source": "노시현",
-"source_role": "풀스택",
-"target": "송하린",
-"target_role": "프론트엔드",
-"reason": "풀스택 경험을 화면 구현과 API 연동 사이의 조율에 활용할 수 있습니다."
-}
-],
-"risks": [
-"leader_score 4.0 이상 팀장 후보가 없습니다."
-],
-"team_notes": [],
-"leader_reason": "리더십 3점, 기획 정리력 4점, 문제 해결력 4점을 기준으로 leader_score 3.6점입니다."
-},
-"strengths": "리더로 지정된 노시현을 중심으로 프로젝트 구조화와 일정 조율을 맡기기 적합한 구성입니다. 박서윤의 RAG 기반 Q&A 설계 능력과 송하린의 Next.js 프론트엔드 구현 능력이 만나 분석 결과를 사용자 친화적인 화면으로 제공하는 기능을 완성할 수 있습니다.",
-"weaknesses": "백엔드 전담 인력이 한 명이라 API 설계와 운영 책임이 노시현에게 과중될 우려가 있습니다. 초기에는 API 명세와 테스트 케이스를 문서화하고 박서윤의 AI 인터페이스 요구사항을 함께 정리해 역할을 명확히 분배하면 부담을 줄일 수 있습니다."
-},
-{
-"team_name": "팀 3",
-"members": [
-"서강준",
-"한유림",
-"민하준",
-"이건우",
-"오태민"
-],
-"total_score": 120.21,
-"role_groups": [
-{
-"role_group": "backend",
-"count": 1
-},
-{
-"role_group": "frontend",
-"count": 1
-},
-{
-"role_group": "app",
-"count": 1
-},
-{
-"role_group": "security",
-"count": 1
-},
-{
-"role_group": "ai_data",
-"count": 1
-}
-],
-"leader": "서강준",
-"reason_cards": [
-{
-"title": "역할 보완으로 구현 범위를 확보한 팀",
-"description": "한유림의 복합 UI 구조화 역량을 배치해 프론트엔드 요구를 명확히 하고, 민하준의 Android 다중 화면 구현 역량을 더해 모바일과 웹 요구를 함께 수용하도록 배치했습니다. 초기 기능 우선순위 협의에서 각 화면의 핵심 흐름을 빠르게 정리하기 위해 같은 팀에 배치했습니다. 이를 통해 초기 명세를 실제 화면과 연동해 검증하려는 목적을 반영했습니다."
-},
-{
-"title": "분석 결과를 API로 연결하기 좋은 팀",
-"description": "오태민의 데이터 전처리 및 간단한 모델 배포 경험을 서강준의 백엔드 설계와 연결하도록 배치했습니다. 분석 결과를 저장 구조와 API 응답 형식에 맞춰 초반에 검증해 데이터 제공 흐름을 다듬기 위해 같은 팀에 배치했습니다. 이를 통해 분석 산출물을 화면이나 앱에서 활용 가능한 형태로 정리하고자 배치했습니다."
-}
-],
-"reason": "한유림의 복합 UI 구조화 역량을 배치해 프론트엔드 요구를 명확히 하고, 민하준의 Android 다중 화면 구현 역량을 더해 모바일과 웹 요구를 함께 수용하도록 배치했습니다. 초기 기능 우선순위 협의에서 각 화면의 핵심 흐름을 빠르게 정리하기 위해 같은 팀에 배치했습니다. 이를 통해 초기 명세를 실제 화면과 연동해 검증하려는 목적을 반영했습니다. 오태민의 데이터 전처리 및 간단한 모델 배포 경험을 서강준의 백엔드 설계와 연결하도록 배치했습니다. 분석 결과를 저장 구조와 API 응답 형식에 맞춰 초반에 검증해 데이터 제공 흐름을 다듬기 위해 같은 팀에 배치했습니다. 이를 통해 분석 산출물을 화면이나 앱에서 활용 가능한 형태로 정리하고자 배치했습니다.",
-"leader_reason": "리더십 4점, 기획 정리력 3점, 문제 해결력 4점을 기준으로 leader_score 3.7점입니다.",
-"personality_averages": {
-"communication": 3.4,
-"responsibility": 3.4,
-"collaboration": 3.2,
-"flexibility": 3.4,
-"emotionalStability": 3.0
-},
-"development_averages": {
-"leadership": 3.2,
-"problemSolving": 4.0,
-"implementation": 3.8,
-"learningAbility": 3.8,
-"planning": 3.0
-},
-"trait_risks": [
-"leader_score 4.0 이상 팀장 후보가 없습니다."
-],
-"preference_notes": [],
-"matching_evidence": {
-"role_distribution": [
-{
-"role": "백엔드",
-"count": 1
-},
-{
-"role": "프론트엔드",
-"count": 1
-},
-{
-"role": "앱",
-"count": 1
-},
-{
-"role": "보안",
-"count": 1
-},
-{
-"role": "AI",
-"count": 1
-}
-],
-"preference": {
-"matched": [],
-"unmatched": [],
-"matched_count": 0,
-"unmatched_count": 0
-},
-"leader_selection": {
-"leader": "서강준",
-"reason": "wants_leader",
-"candidate_names": [
-"서강준"
-]
-},
-"key_placements": [
-{
-"student": "서강준",
-"reason_type": "leader_preference",
-"reason": "팀장 희망이 반영되어 일정 정리와 의사결정 중심 역할을 맡기 좋습니다."
-},
-{
-"student": "한유림",
-"reason_type": "role_balance",
-"reason": "프론트엔드 역할을 맡아 팀의 구현 범위를 보완합니다."
-},
-{
-"student": "민하준",
-"reason_type": "role_balance",
-"reason": "앱 역할을 맡아 팀의 구현 범위를 보완합니다."
-}
-],
-"implementation_connections": [
-{
-"source": "서강준",
-"source_role": "백엔드",
-"target": "한유림",
-"target_role": "프론트엔드",
-"reason": "API와 화면 연동 흐름을 함께 맞출 수 있습니다."
-},
-{
-"source": "서강준",
-"source_role": "백엔드",
-"target": "민하준",
-"target_role": "앱",
-"reason": "서버 기능을 앱 화면과 안정적으로 연결할 수 있습니다."
-},
-{
-"source": "오태민",
-"source_role": "AI",
-"target": "서강준",
-"target_role": "백엔드",
-"reason": "분석 결과를 API와 저장 구조로 연결하기 좋습니다."
-},
-{
-"source": "오태민",
-"source_role": "AI",
-"target": "한유림",
-"target_role": "프론트엔드",
-"reason": "분석 결과를 사용자가 이해할 수 있는 화면으로 풀어낼 수 있습니다."
-}
-],
-"risks": [
-"leader_score 4.0 이상 팀장 후보가 없습니다."
-],
-"team_notes": [],
-"leader_reason": "리더십 4점, 기획 정리력 3점, 문제 해결력 4점을 기준으로 leader_score 3.7점입니다."
-},
-"strengths": "팀장 희망을 표시한 서강준을 중심으로 일정 정리와 의사결정 역할을 맡기기 좋은 구성입니다. 서강준의 API 및 데이터 구조 설계 능력과 오태민의 데이터 전처리·분석 능력이 만나 분석 결과를 안정적으로 API로 제공하고 저장 구조에 반영하는 결과를 만들 수 있습니다.",
-"weaknesses": "데이터 파이프라인과 모델 서빙 관련 작업이 오태민에게 집중될 경우 개발 속도 저하가 발생할 수 있습니다. 서강준과 오태민이 초반에 데이터 포맷과 API 스펙을 공동으로 정리하고 단계별로 기능을 나누어 구현하면 부담을 완화할 수 있습니다."
-},
-{
-"team_name": "팀 4",
-"members": [
-"권서준",
-"홍다은",
-"강민재",
-"정예나",
-"신우진"
-],
-"total_score": 120.37,
-"role_groups": [
-{
-"role_group": "devops",
-"count": 1
-},
-{
-"role_group": "app",
 "count": 1
 },
 {
@@ -2917,53 +1555,47 @@
 "count": 1
 },
 {
-"role_group": "frontend",
-"count": 1
-},
-{
 "role_group": "ai_data",
 "count": 1
+},
+{
+"role_group": "app",
+"count": 1
 }
 ],
-"leader": "권서준",
+"leader": "허재원",
 "reason_cards": [
 {
-"title": "백엔드와 프론트엔드 간 구현 흐름을 맞춘 팀",
-"description": "강민재의 REST API 설계 경험을 정예나의 프론트 구현 역량과 맞춰 배치했습니다. 화면에서 요구하는 데이터 표현 방식과 API 응답 구조를 초반에 함께 조율해 개발 연속성을 확보하려는 의도로 같은 팀에 배치했습니다. 이를 통해 프론트 요구를 반영한 API 협의와 테스트를 조기에 진행할 수 있게 배치했습니다."
+"title": "팀장 희망을 반영한 운영 중심 팀",
+"description": "허재원님의 팀장 희망을 반영해 초반 일정 조율과 의사결정 창구를 명확히 했습니다. 허재원의 프론트 구현 중심으로 김세찬의 분석 결과가 초기 화면 설계에 신속히 반영되도록 배치했습니다. 이를 통해 초기 요구사항 확정과 우선순위 판단이 빠르게 이루어지도록 구성했습니다."
 },
 {
-"title": "초기 인프라와 배포를 고려한 실무 중심 배치",
-"description": "권서준의 CI/CD 및 환경 구성 경험을 바탕으로 초기 개발 환경과 배포 파이프라인 부담을 줄이기 위해 배치했습니다. 강민재의 백엔드 설계 역량과 연결해 서비스 구동과 배포 과정을 초반부터 함께 정리하도록 같은 팀에 배치했습니다. 이는 개발 환경 안정화와 배포 흐름 확인을 조기에 진행하기 위한 의도입니다."
+"title": "백엔드-앱 연결로 모바일 기능 흐름을 맞춘 팀",
+"description": "양원우의 백엔드 구현 경험을 노지완의 앱 구현 역량과 직접 연결해 서버 API와 모바일 화면의 데이터 흐름을 초반부터 맞추도록 구성했습니다. 이로써 앱 기능 구현 과정에서 통신 규격과 예외 처리 기준을 빠르게 검증할 수 있도록 설계했습니다. 개발 초기부터 API 스펙을 문서화하고 예외 처리 기준을 정해 배포 전 주요 동작을 사전에 확인할 수 있도록 했습니다."
 }
 ],
-"reason": "강민재의 REST API 설계 경험을 정예나의 프론트 구현 역량과 맞춰 배치했습니다. 화면에서 요구하는 데이터 표현 방식과 API 응답 구조를 초반에 함께 조율해 개발 연속성을 확보하려는 의도로 같은 팀에 배치했습니다. 이를 통해 프론트 요구를 반영한 API 협의와 테스트를 조기에 진행할 수 있게 배치했습니다. 권서준의 CI/CD 및 환경 구성 경험을 바탕으로 초기 개발 환경과 배포 파이프라인 부담을 줄이기 위해 배치했습니다. 강민재의 백엔드 설계 역량과 연결해 서비스 구동과 배포 과정을 초반부터 함께 정리하도록 같은 팀에 배치했습니다. 이는 개발 환경 안정화와 배포 흐름 확인을 조기에 진행하기 위한 의도입니다.",
-"leader_reason": "리더십 3점, 기획 정리력 3점, 문제 해결력 4점을 기준으로 leader_score 3.3점입니다.",
+"reason": "허재원님의 팀장 희망을 반영해 초반 일정 조율과 의사결정 창구를 명확히 했습니다. 허재원의 프론트 구현 중심으로 김세찬의 분석 결과가 초기 화면 설계에 신속히 반영되도록 배치했습니다. 이를 통해 초기 요구사항 확정과 우선순위 판단이 빠르게 이루어지도록 구성했습니다. 양원우의 백엔드 구현 경험을 노지완의 앱 구현 역량과 직접 연결해 서버 API와 모바일 화면의 데이터 흐름을 초반부터 맞추도록 구성했습니다. 이로써 앱 기능 구현 과정에서 통신 규격과 예외 처리 기준을 빠르게 검증할 수 있도록 설계했습니다. 개발 초기부터 API 스펙을 문서화하고 예외 처리 기준을 정해 배포 전 주요 동작을 사전에 확인할 수 있도록 했습니다.",
+"leader_reason": "리더십 4점, 기획 정리력 4점, 문제 해결력 4점을 기준으로 leader_score 4.0점입니다.",
 "personality_averages": {
-"communication": 3.4,
-"responsibility": 3.6,
-"collaboration": 3.2,
-"flexibility": 3.4,
-"emotionalStability": 3.0
+"communication": 3.75,
+"responsibility": 4.0,
+"collaboration": 3.75,
+"flexibility": 3.75,
+"emotionalStability": 3.5
 },
 "development_averages": {
-"leadership": 3.0,
+"leadership": 3.5,
 "problemSolving": 4.0,
-"implementation": 3.8,
-"learningAbility": 3.8,
-"planning": 3.0
+"implementation": 4.0,
+"learningAbility": 4.0,
+"planning": 3.5
 },
-"trait_risks": [
-"leader_score 4.0 이상 팀장 후보가 없습니다."
-],
+"trait_risks": [],
 "preference_notes": [],
 "matching_evidence": {
 "role_distribution": [
 {
-"role": "DevOps",
-"count": 1
-},
-{
-"role": "앱",
+"role": "프론트엔드",
 "count": 1
 },
 {
@@ -2971,11 +1603,11 @@
 "count": 1
 },
 {
-"role": "프론트엔드",
+"role": "AI",
 "count": 1
 },
 {
-"role": "AI",
+"role": "앱",
 "count": 1
 }
 ],
@@ -2986,67 +1618,66 @@
 "unmatched_count": 0
 },
 "leader_selection": {
-"leader": "권서준",
+"leader": "허재원",
 "reason": "wants_leader",
 "candidate_names": [
-"권서준"
+"허재원",
+"양원우"
 ]
 },
 "key_placements": [
 {
-"student": "권서준",
+"student": "허재원",
 "reason_type": "leader_preference",
 "reason": "팀장 희망이 반영되어 일정 정리와 의사결정 중심 역할을 맡기 좋습니다."
 },
 {
-"student": "홍다은",
-"reason_type": "role_balance",
-"reason": "앱 역할을 맡아 팀의 구현 범위를 보완합니다."
-},
-{
-"student": "강민재",
+"student": "양원우",
 "reason_type": "role_balance",
 "reason": "백엔드 역할을 맡아 팀의 구현 범위를 보완합니다."
+},
+{
+"student": "김세찬",
+"reason_type": "role_balance",
+"reason": "AI 역할을 맡아 팀의 구현 범위를 보완합니다."
 }
 ],
 "implementation_connections": [
 {
-"source": "강민재",
+"source": "양원우",
 "source_role": "백엔드",
-"target": "정예나",
+"target": "허재원",
 "target_role": "프론트엔드",
 "reason": "API와 화면 연동 흐름을 함께 맞출 수 있습니다."
 },
 {
-"source": "강민재",
+"source": "양원우",
 "source_role": "백엔드",
-"target": "홍다은",
+"target": "노지완",
 "target_role": "앱",
 "reason": "서버 기능을 앱 화면과 안정적으로 연결할 수 있습니다."
 },
 {
-"source": "신우진",
+"source": "김세찬",
 "source_role": "AI",
-"target": "강민재",
+"target": "양원우",
 "target_role": "백엔드",
 "reason": "분석 결과를 API와 저장 구조로 연결하기 좋습니다."
 },
 {
-"source": "신우진",
+"source": "김세찬",
 "source_role": "AI",
-"target": "정예나",
+"target": "허재원",
 "target_role": "프론트엔드",
 "reason": "분석 결과를 사용자가 이해할 수 있는 화면으로 풀어낼 수 있습니다."
 }
 ],
-"risks": [
-"leader_score 4.0 이상 팀장 후보가 없습니다."
-],
+"risks": [],
 "team_notes": [],
-"leader_reason": "리더십 3점, 기획 정리력 3점, 문제 해결력 4점을 기준으로 leader_score 3.3점입니다."
+"leader_reason": "리더십 4점, 기획 정리력 4점, 문제 해결력 4점을 기준으로 leader_score 4.0점입니다."
 },
-"strengths": "팀장 희망을 표시한 권서준을 중심으로 CI/CD와 배포 자동화를 맡기기 적합한 구성입니다. 권서준의 CI/CD 자동화 역량과 강민재의 API 설계 능력이 만나 배포 파이프라인과 서비스 연동을 안정적으로 운영할 수 있는 결과를 만들 수 있습니다.",
-"weaknesses": "인프라와 배포 자동화 업무가 권서준에게 집중되면 초기 세팅과 운영 부담이 커질 수 있습니다. 강민재와 신우진이 미리 API·추론 파이프라인 명세를 정리하고 배포 스크립트와 모니터링을 우선 구축하는 방식으로 부담을 분산시키면 좋습니다."
+"strengths": "허재원의 팀장 희망이 반영되어 일정 정리와 의사결정 중심 역할을 맡기 좋습니다. 김세찬의 FastAPI와 프롬프트 제어 능력과 양원우의 Spring Security·Docker 기반 API 및 배포 경험이 만나 AI 분석 결과를 안전하게 백엔드로 연결하고 사용자 화면으로 제공하는 흐름을 만들 수 있습니다.",
+"weaknesses": "운영·배포와 관련된 역할이 명확히 분담되어 있지 않아 배포 준비나 환경 설정에서 초반 지연이 발생할 수 있습니다. 양원우의 Docker Compose와 AWS 배포 경험을 초반 담당으로 지정하고, 허재원과 노지완이 핵심 화면 우선순위를 합의해 점진적으로 기능을 배포하는 방식으로 보완하면 효과적입니다."
 }
 ],
 "adjustment_history": [],
