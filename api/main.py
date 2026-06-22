@@ -633,7 +633,7 @@ def run_matching(payload: Any = Body(default=None)):
         )
         return build_team_summary(result)
 
-    result = run_workflow(force_rematch=True)
+    result = run_workflow(force_rematch=True, analyzed_students=analyzed_students)
     return build_team_summary(result)
 
 

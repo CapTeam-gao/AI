@@ -2854,9 +2854,9 @@ def run_regenerate_workflow(
 
 # 일반 팀 매칭 워크플로우의 최초 state를 만든다.
 # 학생 분석 결과를 로드하고 나머지 상태 필드는 빈 값으로 초기화한다.
-def build_initial_state() -> MatchingState:
+def build_initial_state(analyzed_students: Optional[List[Dict[str, Any]]] = None) -> MatchingState:
     return {
-        "analyzed_students": load_analysis_output_json(), #여기서 불러온거 학생분석 analyzed state에 넣어줌
+        "analyzed_students": analyzed_students or load_analysis_output_json(), #여기서 불러온거 학생분석 analyzed state에 넣어줌
         "teams": [],
         "balance_result": {},
         "team_evaluations": [],
@@ -2919,13 +2919,13 @@ def build_algorithm_only_result(state: MatchingState, error: Exception) -> Match
 
 # 일반 팀 매칭 워크플로우의 공개 진입점이다.
 # 캐시 사용 여부를 확인하고, LangGraph 실행 실패 시 규칙 기반 fallback 결과를 저장/반환한다.
-def run_workflow(force_rematch=False):
+def run_workflow(force_rematch=False, analyzed_students: Optional[List[Dict[str, Any]]] = None):
     cached_result = load_cached_matching_result(force_rematch=force_rematch)
     if cached_result is not None:
         print("기존 매칭 결과를 MySQL에서 불러오는 중")
         return cached_result
 
-    initial_state = build_initial_state()
+    initial_state = build_initial_state(analyzed_students=analyzed_students)
     try:
         result = app.invoke(initial_state)
     except Exception as error:
