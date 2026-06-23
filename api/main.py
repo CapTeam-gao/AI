@@ -578,6 +578,9 @@ def build_team_summary(matching_output: Dict[str, Any] = None) -> Dict[str, Any]
     return {
         "total_students": len(student_map),
         "total_teams": len(teams),
+        "changed": final_result.get("changed", False),
+        "change_summary": final_result.get("change_summary", ""),
+        "validation_notes": final_result.get("validation_notes", ""),
         "teams": teams,
     }
 
@@ -642,10 +645,15 @@ def run_matching(payload: Any = Body(default=None)):
 # prompt, current_teams, 선택적 students를 받아 재생성 결과 요약을 반환한다.
 def regenerate_matching(payload: Optional[Dict[str, Any]] = Body(default=None)):
     from student_analysis.analysis_llm import get_analyze_stu
-    from matching_student.upstage_matching import run_regenerate_workflow
+    from matching_student.workflow_matching_student import run_regenerate_workflow
 
     payload = payload or {}
-    prompt = (payload.get("prompt") or "").strip()
+    prompt = (
+        payload.get("prompt")
+        or payload.get("regeneration_prompt")
+        or payload.get("regenerationPrompt")
+        or ""
+    ).strip()
     if not prompt:
         raise HTTPException(status_code=400, detail="재생성 프롬프트가 비어 있습니다.")
 
