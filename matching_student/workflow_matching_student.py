@@ -770,8 +770,8 @@ class FinalTeam(BaseModel):
 class TeamMatchingResult(BaseModel):
     final_teams: List[FinalTeam] = Field(description="최종 팀 매칭 결과")
     changed: bool = Field(description="initial_teams에서 팀원이 바뀌었으면 true")
-    change_summary: str = Field(description="변경한 내용 요약")
-    validation_notes: str = Field(description="매칭 기준 검증 메모")
+    change_summary: str = Field(description="사용자 재생성 요청을 어떻게 반영했는지 포함한 변경 내용 요약")
+    validation_notes: str = Field(description="중복/누락/팀 수/인원 차이 검증 결과와 요청을 반영하지 못한 이유")
 
 
 
@@ -1599,7 +1599,10 @@ def get_adjust_team_prompt_chain():
     반영해야 할 정보:
     - balance_result.algorithm_result.errors는 반드시 해결한다.
     - balance_result.algorithm_result.warnings는 가능하면 완화한다.
-    - balance_result.llm_result.adjustment_request는 참고만 하고, algorithm_result.errors의 중복/누락/없는 이름/팀 수 오류 해결을 최우선으로 한다.
+    - balance_result.llm_result.adjustment_request는 사용자의 재생성 요청이다. 중복/누락/없는 이름/팀 수/팀 인원 차이 규칙을 깨지 않는 범위에서 적극적으로 반영한다.
+    - 사용자 요청이 특정 역할군 분산, 팀원 이동, 팀장 변경처럼 실행 가능한 조건이면 current_candidate에서 최소 이동으로 반영한다.
+    - current_candidate가 이미 사용자 요청을 만족하거나 검증 규칙 때문에 반영할 수 없는 경우가 아니라면 changed=false로 두지 않는다.
+    - 사용자 요청을 전부 반영할 수 없으면 가능한 부분만 반영하고, 불가능한 이유를 validation_notes에 명확히 쓴다.
     - student_analysis의 strength, weakness, suggestion은 내부 판단 근거로만 사용하고 reason에 학생별 분석문을 옮겨 쓰지 않는다.
     - 성격성향/개발성향 점수는 팀 보완 관계를 판단할 때 사용하되, reason에는 숫자 점수를 직접 쓰지 않는다.
 
@@ -1620,14 +1623,15 @@ def get_adjust_team_prompt_chain():
     - members는 학생 이름 문자열 배열로만 작성한다.
     - changed는 current_candidate에서 팀원이 바뀌었으면 true, 그대로면 false다.
     - reason_cards와 reason은 작성하지 않거나 빈 값으로 둔다. 배정 이유는 최종 팀 확정 후 별도 노드에서 생성한다.
-    - change_summary에는 어떤 검증 실패를 어떻게 고쳤는지 작성한다.
-    - validation_notes에는 다시 검증할 때 확인해야 할 내용을 작성한다.
+    - change_summary에는 사용자 요청을 어떻게 반영했는지와 어떤 검증 실패를 어떻게 고쳤는지 함께 작성한다.
+    - validation_notes에는 중복/누락/없는 이름/팀 수/인원 차이 검증 결과와, 사용자 요청을 반영하지 못한 부분이 있으면 그 이유를 작성한다.
     """
 
     user_prompt = """
     아래 검증 실패 정보를 바탕으로 팀 후보를 수정해라.
     algorithm_result.errors의 중복 배정, 누락 학생, 없는 이름, 팀 수 오류를 최우선으로 해결해라.
-    balance_result.llm_result.adjustment_request는 참고 정보일 뿐이며, 그 요청을 따르면 중복/누락이 생기는 경우 반드시 무시해라.
+    balance_result.llm_result.adjustment_request는 사용자 재생성 요청이다. 중복/누락/없는 이름/팀 수/인원 차이 규칙을 깨지 않는 범위에서 적극적으로 반영해라.
+    사용자 요청을 완전히 반영할 수 없으면 가능한 대안을 적용하고 validation_notes에 반영하지 못한 이유를 써라.
     이 단계에서는 팀원 배정, 역할 분포, 팀장만 결정하고 배정 이유는 작성하지 마라.
 
     allowed_student_names:
@@ -2598,9 +2602,13 @@ def finalize_node(state: MatchingState) -> Dict[str, Any]:
     enriched_teams = enrich_final_teams(candidate_teams, analyzed_students)
     analyzed_teams = run_parallel_strength_weakness(enriched_teams, analyzed_students)
     final_teams = run_parallel_reason_cards(analyzed_teams, analyzed_students)
+    llm_result = state.get("llm_result", {})
 
     final_result = {
         "final_teams": final_teams,
+        "changed": llm_result.get("changed", False),
+        "change_summary": llm_result.get("change_summary", ""),
+        "validation_notes": llm_result.get("validation_notes", ""),
         "adjustment_history": state.get("adjustment_history", []),
         "preference_rejections": build_preference_rejections(
             get_candidate_teams(final_teams),
@@ -2767,11 +2775,14 @@ def build_regenerate_state(
 ) -> MatchingState:
     algorithm_teams = create_initial_teams(analyzed_students)
     current_candidate = normalize_current_teams(current_teams)
+    current_candidate_source = "request_current_teams" if current_candidate else ""
     if not current_candidate:
         cached_result = load_cached_matching_result(force_rematch=False) or {}
         current_candidate = get_candidate_teams((cached_result.get("final_result") or cached_result))
+        current_candidate_source = "cached_matching_result" if current_candidate else ""
     if not current_candidate:
         current_candidate = algorithm_teams
+        current_candidate_source = "algorithm_initial_teams"
 
     algorithm_result, team_evaluations = validation_balance_team(
         candidate_result=current_candidate,
@@ -2806,7 +2817,10 @@ def build_regenerate_state(
             "final_teams": current_candidate,
             "changed": False,
             "change_summary": "사용자 프롬프트 재생성 전 현재 팀 구성입니다.",
-            "validation_notes": "사용자 프롬프트를 반영해 조정합니다.",
+            "validation_notes": (
+                "사용자 프롬프트를 반영해 조정합니다. "
+                f"기준 팀 출처: {current_candidate_source}."
+            ),
         },
         "iteration_count": 0,
     }
