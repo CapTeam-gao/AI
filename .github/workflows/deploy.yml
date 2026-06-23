@@ -33,7 +33,7 @@ jobs:
       EC2_PORT: ${{ secrets.EC2_PORT || '22' }}
       EC2_USERNAME: ${{ secrets.EC2_USER }}
       EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
-      DEPLOY_PATH: ${{ secrets.EC2_DEPLOY_PATH || '/home/ubuntu/gaoAi' }}
+      DEPLOY_PATH: ${{ secrets.EC2_DEPLOY_PATH || '/home/ec2-user/AI' }}
       UPSTAGE_API_KEY: ${{ secrets.UPSTAGE_API_KEY }}
 
     steps:
