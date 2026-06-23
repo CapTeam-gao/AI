@@ -3,7 +3,7 @@ version: '3.8'
 services:
   ai-server:
     build: .
-    container_name: ai-server
+    container_name: gao-ai-server
     ports:
       - "8000:8000"
     depends_on:
@@ -23,13 +23,13 @@ services:
 
   mysql:
     image: mysql:8.0
-    container_name: mysql
+    container_name: gao-ai-mysql
     restart: always
     environment:
       MYSQL_ROOT_PASSWORD: 1234
       MYSQL_DATABASE: mydb
     ports:
-      - "3307:3306"
+      - "4000:3306"
     volumes:
       - mysql_data:/var/lib/mysql
 
