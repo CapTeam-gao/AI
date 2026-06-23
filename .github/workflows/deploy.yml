@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - jinuk
   workflow_dispatch:
 
 concurrency:
