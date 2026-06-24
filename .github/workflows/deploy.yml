@@ -146,6 +146,7 @@ jobs:
 
           cat > .env <<'EOF'
           UPSTAGE_API_KEY=${{ secrets.UPSTAGE_API_KEY }}
+          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
           AI_IMAGE=${{ env.AI_IMAGE }}
           EOF
 
