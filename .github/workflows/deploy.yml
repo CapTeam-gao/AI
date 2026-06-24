@@ -153,6 +153,7 @@ jobs:
           printf '%s\n' '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
           docker compose config
           docker compose pull ai-server
+          docker rm -f gao-ai-server gao-ai-mysql 2>/dev/null || true
           docker compose up -d --remove-orphans
           docker compose ps
           REMOTE_SCRIPT
