@@ -3,7 +3,7 @@ name: Deploy AI Server
 on:
   push:
     branches:
-      - jinuk
+      - main
       - master
   workflow_dispatch:
 
