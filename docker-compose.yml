@@ -20,6 +20,7 @@ services:
       ANALYSIS_RESULT_TABLE: student_analysis_results
       MATCHING_RESULT_TABLE: team_matching_results
       UPSTAGE_API_KEY: ${UPSTAGE_API_KEY}
+      OPENAI_API_KEY: ${UPSTAGE_API_KEY}
       UPSTAGE_API_BASE: https://api.upstage.ai/v1
 
   mysql:
