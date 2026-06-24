@@ -114,6 +114,11 @@ def normalize_request_students(students: Optional[List[Dict[str, Any]]]) -> Opti
         normalized = dict(student)
         normalized["user_id"] = _first_present(student, "user_id", "userId", "student_id", "studentId")
         normalized["name"] = _first_present(student, "name", "studentName")
+        if isinstance(normalized["name"], str):
+            normalized["name"] = normalized["name"].strip()
+        if not normalized["name"]:
+            user_id = normalized.get("user_id") or "unknown"
+            raise HTTPException(status_code=400, detail=f"학생 이름이 비어 있습니다: {user_id}")
         normalized["role"] = _first_present(student, "role", "studentRole")
         normalized["stack"] = _first_present(student, "stack", "skill", "skills") or []
         normalized["experience"] = _first_present(student, "experience", "experiences") or []
@@ -501,6 +506,11 @@ def build_member_summaries(
         student = student_map.get(member_name, {})
         enriched_member = ensure_trait_profile({**student, **member})
         summaries.append({
+            "user_id": (
+                enriched_member.get("user_id")
+                or enriched_member.get("userId")
+                or enriched_member.get("student_id")
+            ),
             "name": enriched_member.get("name"),
             "role": enriched_member.get("role"),
             "role_group": enriched_member.get("role_group") or get_display_role_group(enriched_member.get("role", "")),
