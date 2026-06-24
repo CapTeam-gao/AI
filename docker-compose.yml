@@ -1,8 +1,6 @@
-version: '3.8'
-
 services:
   ai-server:
-    build: .
+    image: ${AI_IMAGE:-ghcr.io/capteam-gao/ai:latest}
     container_name: gao-ai-server
     cpus: "${AI_SERVER_CPUS:-1.5}"
     ports:

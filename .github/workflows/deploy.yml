@@ -3,89 +3,156 @@ name: Deploy AI Server
 on:
   push:
     branches:
-      - main
       - jinuk
+      - master
   workflow_dispatch:
 
 concurrency:
   group: deploy-ai-server
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
-  docker-build-check:
-    name: Docker build check
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Build Docker image
-        run: docker build -t gao-ai-server:ci .
-
   deploy:
-    name: Deploy to EC2
     runs-on: ubuntu-latest
-    needs: docker-build-check
 
     env:
-      EC2_HOST: ${{ secrets.EC2_HOST }}
-      EC2_PORT: ${{ secrets.EC2_PORT || '22' }}
-      EC2_USERNAME: ${{ secrets.EC2_USER }}
-      EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
-      DEPLOY_PATH: ${{ secrets.EC2_DEPLOY_PATH || '/home/ec2-user/AI' }}
-      UPSTAGE_API_KEY: ${{ secrets.UPSTAGE_API_KEY }}
-      LANGSMITH_TRACING: ${{ secrets.LANGSMITH_TRACING }}
-      LANGSMITH_ENDPOINT: ${{ secrets.LANGSMITH_ENDPOINT }}
-      LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
-      LANGSMITH_PROJECT: ${{ secrets.LANGSMITH_PROJECT }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      AI_IMAGE: ghcr.io/capteam-gao/ai:${{ github.sha }}
 
     steps:
-      - name: Checkout repository
+      - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Validate required secrets
-        run: |
-          test -n "$EC2_HOST"
-          test -n "$EC2_PORT"
-          test -n "$EC2_USERNAME"
-          test -n "$EC2_SSH_KEY"
-          test -n "$UPSTAGE_API_KEY"
-          test -n "$LANGSMITH_TRACING"
-          test -n "$LANGSMITH_ENDPOINT"
-          test -n "$LANGSMITH_API_KEY"
-          test -n "$LANGSMITH_PROJECT"
-          test -n "$OPENAI_API_KEY"
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Configure SSH
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push AI image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.AI_IMAGE }}
+            ghcr.io/capteam-gao/ai:latest
+
+      - name: Validate SSH key
+        shell: bash
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
         run: |
+          set -euo pipefail
+
           mkdir -p ~/.ssh
-          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/ec2_key
-          chmod 600 ~/.ssh/ec2_key
-          ssh-keyscan -p "$EC2_PORT" "$EC2_HOST" >> ~/.ssh/known_hosts
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keygen -y -f ~/.ssh/deploy_key > /dev/null
 
-      - name: Sync project files to EC2
+      - name: Upload source to EC2
+        shell: bash
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_PORT: ${{ secrets.EC2_PORT }}
+          EC2_DEPLOY_PATH: ${{ secrets.EC2_DEPLOY_PATH }}
         run: |
-          ssh -i ~/.ssh/ec2_key -p "$EC2_PORT" "$EC2_USERNAME@$EC2_HOST" "mkdir -p '$DEPLOY_PATH'"
-          rsync -az \
-            --exclude '.git' \
-            --exclude '.github' \
-            --exclude '.venv' \
-            --exclude '__pycache__' \
-            --exclude '.idea' \
-            -e "ssh -i ~/.ssh/ec2_key -p $EC2_PORT" \
-            ./ "$EC2_USERNAME@$EC2_HOST:$DEPLOY_PATH/"
+          set -euo pipefail
 
-      - name: Write production environment file
-        run: |
-          printf 'UPSTAGE_API_KEY=%s\nLANGSMITH_TRACING=%s\nLANGSMITH_ENDPOINT=%s\nLANGSMITH_API_KEY=%s\nLANGSMITH_PROJECT=%s\nOPENAI_API_KEY=%s\n' "$UPSTAGE_API_KEY" "$LANGSMITH_TRACING" "$LANGSMITH_ENDPOINT" "$LANGSMITH_API_KEY" "$LANGSMITH_PROJECT" "$OPENAI_API_KEY" |
-            ssh -i ~/.ssh/ec2_key -p "$EC2_PORT" "$EC2_USERNAME@$EC2_HOST" "cat > '$DEPLOY_PATH/.env'"
+          SSH_OPTIONS=(
+            -i ~/.ssh/deploy_key
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=accept-new
+            -o ConnectTimeout=20
+            -o ConnectionAttempts=3
+            -o ServerAliveInterval=30
+            -o ServerAliveCountMax=20
+            -p "${EC2_PORT:-22}"
+          )
+          SCP_OPTIONS=(
+            -i ~/.ssh/deploy_key
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=accept-new
+            -o ConnectTimeout=20
+            -o ConnectionAttempts=3
+            -o ServerAliveInterval=30
+            -o ServerAliveCountMax=20
+            -P "${EC2_PORT:-22}"
+          )
+          retry() {
+            local attempt
+            for attempt in 1 2 3; do
+              "$@" && return 0
+              sleep $((attempt * 10))
+            done
+            "$@"
+          }
 
-      - name: Restart Docker Compose services
+          APP_DIR="${EC2_DEPLOY_PATH:-/home/${EC2_USER}/apps/gaoAi}"
+          APP_PARENT="$(dirname "$APP_DIR")"
+          RELEASE_DIR="${APP_PARENT}/gaoAi.release"
+          RELEASE_ARCHIVE="${APP_PARENT}/gaoAi.release.tgz"
+          LOCAL_RELEASE_ARCHIVE="${RUNNER_TEMP}/gao-ai-release.tgz"
+
+          tar \
+            --exclude='.git' \
+            --exclude='.venv' \
+            --exclude='.env' \
+            --exclude='__pycache__' \
+            -czf "$LOCAL_RELEASE_ARCHIVE" .
+
+          retry ssh "${SSH_OPTIONS[@]}" "$EC2_USER@$EC2_HOST" "rm -rf '$RELEASE_DIR' && mkdir -p '$RELEASE_DIR'"
+          retry scp "${SCP_OPTIONS[@]}" "$LOCAL_RELEASE_ARCHIVE" "$EC2_USER@$EC2_HOST:$RELEASE_ARCHIVE"
+          retry ssh "${SSH_OPTIONS[@]}" "$EC2_USER@$EC2_HOST" "tar -xzf '$RELEASE_ARCHIVE' -C '$RELEASE_DIR' && rm -f '$RELEASE_ARCHIVE' && rm -rf '$APP_DIR' && mv '$RELEASE_DIR' '$APP_DIR'"
+
+      - name: Deploy on EC2
+        shell: bash
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_PORT: ${{ secrets.EC2_PORT }}
+          EC2_DEPLOY_PATH: ${{ secrets.EC2_DEPLOY_PATH }}
         run: |
-          ssh -i ~/.ssh/ec2_key -p "$EC2_PORT" "$EC2_USERNAME@$EC2_HOST" "
-            cd '$DEPLOY_PATH' &&
-            docker compose up -d --build &&
-            docker image prune -f
-          "
+          set -euo pipefail
+
+          SSH_OPTIONS=(
+            -i ~/.ssh/deploy_key
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=accept-new
+            -o ConnectTimeout=20
+            -o ConnectionAttempts=3
+            -o ServerAliveInterval=30
+            -o ServerAliveCountMax=20
+            -p "${EC2_PORT:-22}"
+          )
+          APP_DIR="${EC2_DEPLOY_PATH:-/home/${EC2_USER}/apps/gaoAi}"
+
+          ssh \
+            "${SSH_OPTIONS[@]}" \
+            "$EC2_USER@$EC2_HOST" \
+            "APP_DIR='$APP_DIR' bash -s" \
+            <<'REMOTE_SCRIPT'
+          set -eu
+
+          cd "$APP_DIR"
+
+          cat > .env <<'EOF'
+          UPSTAGE_API_KEY=${{ secrets.UPSTAGE_API_KEY }}
+          AI_IMAGE=${{ env.AI_IMAGE }}
+          EOF
+
+          chmod 600 .env
+          printf '%s\n' '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
+          docker compose config
+          docker compose pull ai-server
+          docker compose up -d --remove-orphans
+          docker compose ps
+          REMOTE_SCRIPT
