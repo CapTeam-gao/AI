@@ -1091,7 +1091,7 @@ def validation_balance_team(candidate_result, analyzed_students, base_teams=None
             team_errors.append(f"팀 인원이 5명을 초과했습니다. member_count={team_status['member_count']}")
 
         if team_status["skill_levels"].get("낮음", 0) == team_status["member_count"]:
-            team_warnings.append("낮음 학생만으로 구성된 팀입니다.")
+            team_errors.append("낮음 학생만으로 구성된 팀입니다.")
 
         only_role_group = next(iter(team_status["role_groups"]), None)
         if (
@@ -1188,7 +1188,7 @@ def validation_balance_team(candidate_result, analyzed_students, base_teams=None
     hard_score_gap = max(30, average_score * 0.45) if average_score else 0
 
     if team_scores and score_gap > hard_score_gap:
-        warnings.append(
+        errors.append(
             f"팀 점수 차이가 허용 범위를 크게 초과합니다. gap={score_gap}, hard_max={round(hard_score_gap, 2)}"
         )
     elif team_scores and score_gap > soft_score_gap:
