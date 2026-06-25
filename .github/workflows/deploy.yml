@@ -34,6 +34,11 @@ jobs:
       EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
       DEPLOY_PATH: ${{ secrets.EC2_DEPLOY_PATH || '/home/ubuntu/gaoAi' }}
       UPSTAGE_API_KEY: ${{ secrets.UPSTAGE_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      LANGSMITH_TRACING: ${{ secrets.LANGSMITH_TRACING }}
+      LANGSMITH_ENDPOINT: ${{ secrets.LANGSMITH_ENDPOINT }}
+      LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+      LANGSMITH_PROJECT: ${{ secrets.LANGSMITH_PROJECT }}
 
     steps:
       - name: Checkout repository
@@ -46,6 +51,11 @@ jobs:
           test -n "$EC2_USERNAME"
           test -n "$EC2_SSH_KEY"
           test -n "$UPSTAGE_API_KEY"
+          test -n "$OPENAI_API_KEY"
+          test -n "$LANGSMITH_TRACING"
+          test -n "$LANGSMITH_ENDPOINT"
+          test -n "$LANGSMITH_API_KEY"
+          test -n "$LANGSMITH_PROJECT"
 
       - name: Configure SSH
         run: |
@@ -68,8 +78,20 @@ jobs:
 
       - name: Write production environment file
         run: |
-          printf 'UPSTAGE_API_KEY=%s\n' "$UPSTAGE_API_KEY" |
-            ssh -i ~/.ssh/ec2_key -p "$EC2_PORT" "$EC2_USERNAME@$EC2_HOST" "cat > '$DEPLOY_PATH/.env'"
+          cat > .env.production <<EOF
+          UPSTAGE_API_KEY=$UPSTAGE_API_KEY
+          OPENAI_API_KEY=$OPENAI_API_KEY
+          LANGSMITH_TRACING=$LANGSMITH_TRACING
+          LANGSMITH_ENDPOINT=$LANGSMITH_ENDPOINT
+          LANGSMITH_API_KEY=$LANGSMITH_API_KEY
+          LANGSMITH_PROJECT=$LANGSMITH_PROJECT
+          LANGCHAIN_TRACING_V2=$LANGSMITH_TRACING
+          LANGCHAIN_ENDPOINT=$LANGSMITH_ENDPOINT
+          LANGCHAIN_API_KEY=$LANGSMITH_API_KEY
+          LANGCHAIN_PROJECT=$LANGSMITH_PROJECT
+          EOF
+
+          scp -i ~/.ssh/ec2_key -P "$EC2_PORT" .env.production "$EC2_USERNAME@$EC2_HOST:$DEPLOY_PATH/.env"
 
       - name: Restart Docker Compose services
         run: |
