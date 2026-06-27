@@ -52,10 +52,7 @@ jobs:
           test -n "$EC2_SSH_KEY"
           test -n "$UPSTAGE_API_KEY"
           test -n "$OPENAI_API_KEY"
-          test -n "$LANGSMITH_TRACING"
-          test -n "$LANGSMITH_ENDPOINT"
-          test -n "$LANGSMITH_API_KEY"
-          test -n "$LANGSMITH_PROJECT"
+   
 
       - name: Configure SSH
         run: |
