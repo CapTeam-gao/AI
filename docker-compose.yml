@@ -8,13 +8,16 @@ services:
       - "8000:8000"
     depends_on:
       - mysql
+    networks:
+      - default
+      - backend_internal
     environment:
-      DB_HOST: mysql
+      DB_HOST: gao-mysql
       DB_PORT: 3306
       DB_NAME: mydb
-      DB_USER: root
+      DB_USER: user
       DB_PASSWORD: 1234
-      STUDENT_SOURCE_TABLE: students
+      STUDENT_SOURCE_TABLE: users
       STUDENT_SOURCE_ORDER_BY: id
       ANALYSIS_RESULT_TABLE: student_analysis_results
       MATCHING_RESULT_TABLE: team_matching_results
@@ -30,6 +33,9 @@ services:
     image: mysql:8.0
     container_name: mysql
     restart: always
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
     environment:
       MYSQL_ROOT_PASSWORD: 1234
       MYSQL_DATABASE: mydb
@@ -40,3 +46,7 @@ services:
 
 volumes:
   mysql_data:
+
+networks:
+  backend_internal:
+    external: true
