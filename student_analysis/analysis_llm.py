@@ -7,8 +7,7 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", "..", ".en
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"), override=True)
 
 # from s_analysis_fewshot import examples
-from langchain_upstage import ChatUpstage
-from langchain.chat_models import init_chat_model
+from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder , FewShotChatMessagePromptTemplate
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_core.output_parsers import StrOutputParser
@@ -30,11 +29,17 @@ from capteam_traits import ensure_trait_profile
 #클로드코드, codex한번 사서 써봐야할듯.
 #이름 말고 학번으로 주 식별자.
 #지금 매칭로직에서 score들이 되게 중요함 그래서 score들 점수를 잘 매겨야할듯. 상중하도 
-#객체를 계속만들어서 return하면 계속 객체 하나하나 마다 호출되서 한번호출하고 계속쓰는 방식으로 변경 객체 생성비용 줄임
-llm = ChatUpstage(
-        model='solar-pro3',
-        temperature=0,)
-def get_llm(): #모델 랜덤성이 좀 있길레 temperature=0으로 해줌
+# 객체를 한 번만 생성해 학생별 분석 호출에서 재사용한다.
+# GPT-5.4가 학생 경험의 경계 사례를 충분히 검토하도록 기본 추론 강도는 medium으로 둔다.
+llm = ChatOpenAI(
+    model=os.getenv("OPENAI_ANALYSIS_MODEL", "gpt-5.4"),
+    reasoning_effort=os.getenv("OPENAI_ANALYSIS_REASONING_EFFORT", "medium"),
+    timeout=int(os.getenv("OPENAI_TIMEOUT", "120")),
+    max_retries=int(os.getenv("OPENAI_MAX_RETRIES", "2")),
+)
+
+
+def get_llm():
     return llm
 
 
