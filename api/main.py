@@ -1,4 +1,4 @@
-#총인원, 팀이름, 직군별 사람수, 팀장, 학생당 스택점수 제일 높은거 2개, 팀 배정 이유,팀마다 강점약점, 학생마다 skill_level : 상중하
+#총인원, 팀이름, 직군별 사람수, 팀장, 학생당 스택점수 제일 높은거 2개, 팀 배정 이유,팀마다 강점약점, 학생마다 skill_level : 상/중상/중/중하/하
 #팀 재생성 프롬포트 넣어서 팀 재생성 누르면 가능하도록 최종 팀에서 재생성 프롬포트넣어서 llm이 수정하도록 하기.
 import json
 import re
@@ -34,16 +34,22 @@ def _first_present(data: Dict[str, Any], *keys: str) -> Any:
     return None
 
 
-# AI 내부 skill_level 값을 백엔드 StudentLevel enum 문자열로 변환한다.
-# 설문 직후 분석 저장 API가 UPPER/MIDDLE/LOWER 값을 바로 저장할 수 있게 한다.
+# AI 내부 5단계 skill_level 값을 백엔드 StudentLevel enum 문자열로 변환한다.
 def to_backend_student_level(skill_level: str) -> str:
     return {
         "높음": "UPPER",
         "상": "UPPER",
+        "중상": "MIDDLE_UPPER",
         "보통": "MIDDLE",
         "중": "MIDDLE",
+        "중하": "MIDDLE_LOWER",
         "낮음": "LOWER",
         "하": "LOWER",
+        "UPPER": "UPPER",
+        "MIDDLE_UPPER": "MIDDLE_UPPER",
+        "MIDDLE": "MIDDLE",
+        "MIDDLE_LOWER": "MIDDLE_LOWER",
+        "LOWER": "LOWER",
     }.get(skill_level, "MIDDLE")
 
 
@@ -424,27 +430,33 @@ def build_role_counts(
     ]
 
 
-# AI 내부 skill_level 값을 화면 표기용 상/중/하로 변환한다.
-# 이미 상/중/하로 들어온 값은 그대로 유지한다.
+# AI 내부 skill_level과 백엔드 enum을 화면 표기용 5단계로 변환한다.
 def normalize_skill_level_label(skill_level: str) -> str:
     return {
         "높음": "상",
         "보통": "중",
         "낮음": "하",
         "상": "상",
+        "중상": "중상",
         "중": "중",
+        "중하": "중하",
         "하": "하",
+        "UPPER": "상",
+        "MIDDLE_UPPER": "중상",
+        "MIDDLE": "중",
+        "MIDDLE_LOWER": "중하",
+        "LOWER": "하",
     }.get(skill_level, skill_level or "")
 
 
-# 팀원 목록에서 상/중/하 실력 분포 개수를 계산한다.
+# 팀원 목록에서 상/중상/중/중하/하 실력 분포 개수를 계산한다.
 # 관리자 팀 요약 화면의 skill_level_counts 필드를 만든다.
 def get_skill_level_counts(members: List[Dict[str, Any]]) -> Dict[str, int]:
-    counts = {"상": 0, "중": 0, "하": 0}
+    counts = {"상": 0, "중상": 0, "중": 0, "중하": 0, "하": 0}
 
     for member in members:
         level = normalize_skill_level_label(member.get("skill_level"))
-        if level:
+        if level in counts:
             counts[level] += 1
 
     return counts

@@ -78,10 +78,16 @@ class MatchingState(TypedDict):
 #검증할때 실패하면 다시 알고리즘 보고 할수있도록 알고리즘은 그대로 두고 llm_result만 계속 덮어 씌어지면서 수정
 
 # skill_level을 팀 생성용 숫자 점수로 바꾸기 위한 기준.
-# 팀 간 실력 균형을 맞추려면 "보통", "낮음" 같은 문자열보다 숫자가 다루기 편함.
+# 팀 간 실력 균형을 맞추려면 5단계 문자열보다 숫자가 다루기 편함.
 SKILL_LEVEL_SCORE = {
-    "높음": 3,
-    "보통": 2,
+    "상": 5,
+    "중상": 4,
+    "중": 3,
+    "중하": 2,
+    "하": 1,
+    # 기존 3단계 분석 캐시 호환
+    "높음": 5,
+    "보통": 3,
     "낮음": 1,
 }
 
@@ -171,7 +177,7 @@ def get_technical_score(student):
     # 학생 한 명의 기술 점수 계산.
     # skill_level을 큰 기준으로 보고, stack_score 평균을 보조 점수로 더함.
     level_score = SKILL_LEVEL_SCORE.get(student.get('skill_level'),1)
-    #ex skill_level이 보통이면 skill_level_score에서 보통에 value가 2여서 2를 저장
+    # 신규 5단계와 기존 3단계 모두 위 점수표로 변환한다.
     stack_score = parse_stack_score(student.get('stack_score',""))
     #stack_score가져와서 함수써서 숫자만 추출함 없으면 빈 문자열.
     return level_score * 10 + stack_score
@@ -791,7 +797,7 @@ def get_matching_prompt_chain():
 역할:
 - 알고리즘 초안을 기본 정답으로 보고, 자연어 분석상 명확히 더 좋은 조합이 있을 때만 최소한으로 보정한다.
 - 보정이 필요하지 않으면 initial_teams를 그대로 유지하고 이유만 설명한다.
-- 팀별 총점, 역할 다양성, 낮음 학생의 지원 가능성을 함께 본다.
+- 팀별 총점, 역할 다양성, 하위 등급 학생의 지원 가능성을 함께 본다.
 - 성격 성향과 개발 성향 점수는 팀 보완 관계를 판단할 때 사용하되, reason에는 숫자 점수를 직접 쓰지 않는다.
 - preferred_members는 강하게 고려하되, 점수/역할군/성향 균형을 깨면 선호를 분리할 수 있다.
 
@@ -800,7 +806,7 @@ def get_matching_prompt_chain():
 - 팀 수는 initial_teams의 팀 수와 동일하게 유지한다.
 - 각 팀 인원 차이는 1명 이하를 유지한다.
 - 팀 총점 차이를 크게 악화시키는 재배정은 하지 않는다.
-- 낮음 학생은 가능하면 보통 또는 높음 학생과 함께 둔다.
+- 하 또는 낮음 학생은 가능하면 중 이상의 학생과 함께 둔다.
 - 같은 role_group만으로 구성된 팀은 가능하면 피하되, game 역할군은 프로젝트 특성상 가능한 같은 팀에 유지한다.
 - suggestion, strength, weakness는 내부 판단 근거로만 사용하고 reason에 학생별 분석문을 옮겨 쓰지 않는다.
 - 성향/개발 점수는 전체 점수표처럼 나열하지 말고, 낮은 성향을 높은 성향의 팀원이 보완하는 관계를 설명할 때만 사용한다.
@@ -1096,8 +1102,12 @@ def validation_balance_team(candidate_result, analyzed_students, base_teams=None
         elif team_status["member_count"] > 5:
             team_errors.append(f"팀 인원이 5명을 초과했습니다. member_count={team_status['member_count']}")
 
-        if team_status["skill_levels"].get("낮음", 0) == team_status["member_count"]:
-            team_errors.append("낮음 학생만으로 구성된 팀입니다.")
+        lower_level_count = (
+            team_status["skill_levels"].get("하", 0)
+            + team_status["skill_levels"].get("낮음", 0)
+        )
+        if lower_level_count == team_status["member_count"]:
+            team_errors.append("하위 등급 학생만으로 구성된 팀입니다.")
 
         only_role_group = next(iter(team_status["role_groups"]), None)
         if (
@@ -1596,7 +1606,7 @@ def get_adjust_team_prompt_chain():
     - 팀 수는 algorithm_teams와 동일하게 유지한다.
     - 팀별 인원 차이는 1명 이하로 유지한다.
     - 팀 총점 차이를 크게 악화시키지 않는다.
-    - 낮음 학생은 가능하면 보통 또는 높음 학생과 함께 둔다.
+    - 하 또는 낮음 학생은 가능하면 중 이상의 학생과 함께 둔다.
     - 같은 role_group만으로 구성된 팀은 가능하면 피하되, game 역할군은 프로젝트 특성상 가능한 같은 팀에 유지한다.
     - preferred_members는 강하게 고려하되, 점수/역할군/성향 균형을 깨면 선호를 분리할 수 있다.
     - 팀 안에 wants_leader=true인 학생이 있으면 그 학생들 중 leader_score와 technical_score가 높은 학생을 팀장으로 추천한다.
