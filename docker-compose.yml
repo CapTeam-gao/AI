@@ -1,13 +1,10 @@
-version: '3.8'
-
 services:
   ai-server:
     build: .
     container_name: ai-server
+    restart: unless-stopped
     ports:
       - "8000:8000"
-    depends_on:
-      - mysql
     networks:
       - default
       - backend_internal
@@ -32,26 +29,6 @@ services:
       LANGCHAIN_ENDPOINT: ${LANGSMITH_ENDPOINT}
       LANGCHAIN_API_KEY: ${LANGSMITH_API_KEY}
       LANGCHAIN_PROJECT: ${LANGSMITH_PROJECT}
-
-  mysql:
-    image: mysql:8.0
-    container_name: mysql
-    restart: always
-    command:
-      - --character-set-server=utf8mb4
-      - --collation-server=utf8mb4_unicode_ci
-    environment:
-      MYSQL_ROOT_PASSWORD: 1234
-      MYSQL_DATABASE: ${DB_NAME:-gao_db}
-      MYSQL_USER: ${DB_USER:-gao_user}
-      MYSQL_PASSWORD: ${DB_PASSWORD:-1234}
-    ports:
-      - "3307:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
-
-volumes:
-  mysql_data:
 
 networks:
   backend_internal:
