@@ -115,9 +115,9 @@ class StudentSkillLevelTest(unittest.TestCase):
 
     def test_backend_level_mapping_uses_five_level_contract(self):
         self.assertEqual(to_backend_student_level("상"), "UPPER")
-        self.assertEqual(to_backend_student_level("중상"), "MIDDLE_UPPER")
+        self.assertEqual(to_backend_student_level("중상"), "UPPER_MIDDLE")
         self.assertEqual(to_backend_student_level("중"), "MIDDLE")
-        self.assertEqual(to_backend_student_level("중하"), "MIDDLE_LOWER")
+        self.assertEqual(to_backend_student_level("중하"), "LOWER_MIDDLE")
         self.assertEqual(to_backend_student_level("하"), "LOWER")
         self.assertEqual(to_backend_student_level("보통"), "MIDDLE")
 
@@ -137,7 +137,7 @@ class StudentSkillLevelTest(unittest.TestCase):
     def test_team_summary_counts_use_five_levels(self):
         members = [
             {"skill_level": "상"},
-            {"skill_level": "MIDDLE_UPPER"},
+            {"skill_level": "UPPER_MIDDLE"},
             {"skill_level": "보통"},
             {"skill_level": "중하"},
             {"skill_level": "낮음"},

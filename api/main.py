@@ -39,16 +39,18 @@ def to_backend_student_level(skill_level: str) -> str:
     return {
         "높음": "UPPER",
         "상": "UPPER",
-        "중상": "MIDDLE_UPPER",
+        "중상": "UPPER_MIDDLE",
         "보통": "MIDDLE",
         "중": "MIDDLE",
-        "중하": "MIDDLE_LOWER",
+        "중하": "LOWER_MIDDLE",
         "낮음": "LOWER",
         "하": "LOWER",
         "UPPER": "UPPER",
-        "MIDDLE_UPPER": "MIDDLE_UPPER",
+        "UPPER_MIDDLE": "UPPER_MIDDLE",
+        "MIDDLE_UPPER": "UPPER_MIDDLE",
         "MIDDLE": "MIDDLE",
-        "MIDDLE_LOWER": "MIDDLE_LOWER",
+        "LOWER_MIDDLE": "LOWER_MIDDLE",
+        "MIDDLE_LOWER": "LOWER_MIDDLE",
         "LOWER": "LOWER",
     }.get(skill_level, "MIDDLE")
 
@@ -442,8 +444,10 @@ def normalize_skill_level_label(skill_level: str) -> str:
         "중하": "중하",
         "하": "하",
         "UPPER": "상",
+        "UPPER_MIDDLE": "중상",
         "MIDDLE_UPPER": "중상",
         "MIDDLE": "중",
+        "LOWER_MIDDLE": "중하",
         "MIDDLE_LOWER": "중하",
         "LOWER": "하",
     }.get(skill_level, skill_level or "")
