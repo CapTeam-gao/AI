@@ -256,8 +256,10 @@ def cap_stack_score(stack_score, skill_level):
         "보통": 7,
         "높음": 10,
         "LOWER": 4,
+        "LOWER_MIDDLE": 5,
         "MIDDLE_LOWER": 5,
         "MIDDLE": 6,
+        "UPPER_MIDDLE": 7,
         "MIDDLE_UPPER": 7,
         "UPPER": 9,
     }
@@ -362,8 +364,10 @@ def _get_cached_analysis_for_students(
 
 BACKEND_LEVEL_TO_SKILL_LEVEL = {
     "UPPER": "상",
+    "UPPER_MIDDLE": "중상",
     "MIDDLE_UPPER": "중상",
     "MIDDLE": "중",
+    "LOWER_MIDDLE": "중하",
     "MIDDLE_LOWER": "중하",
     "LOWER": "하",
 }

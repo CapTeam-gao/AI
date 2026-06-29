@@ -21,9 +21,9 @@ def get_connection():
         #위에 _env함수를 써서 DB_HOST라는 환경변수가 설정되어 있는지 확인 없으면 지정해준 값으로 근데 docker나 sever에서 환경변수를 주면 그값으로 db에 연결
         host=_env("DB_HOST", "localhost"),
         port=int(_env("DB_PORT", "3306")),
-        user=_env("DB_USER", "root"),
+        user=_env("DB_USER", "gao_user"),
         password=_env("DB_PASSWORD", "1234"),
-        database=_env("DB_NAME", "mydb"),
+        database=_env("DB_NAME", "gao_db"),
         charset="utf8mb4",
         cursorclass=DictCursor,
         autocommit=True,

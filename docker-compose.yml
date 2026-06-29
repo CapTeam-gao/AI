@@ -14,8 +14,8 @@ services:
     environment:
       DB_HOST: gao-mysql
       DB_PORT: 3306
-      DB_NAME: ${DB_NAME:-mydb}
-      DB_USER: ${DB_USER:-user}
+      DB_NAME: ${DB_NAME:-gao_db}
+      DB_USER: ${DB_USER:-gao_user}
       DB_PASSWORD: ${DB_PASSWORD:-1234}
       STUDENT_SOURCE_TABLE: users
       STUDENT_SOURCE_ORDER_BY: user_id
@@ -42,7 +42,9 @@ services:
       - --collation-server=utf8mb4_unicode_ci
     environment:
       MYSQL_ROOT_PASSWORD: 1234
-      MYSQL_DATABASE: mydb
+      MYSQL_DATABASE: ${DB_NAME:-gao_db}
+      MYSQL_USER: ${DB_USER:-gao_user}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-1234}
     ports:
       - "3307:3306"
     volumes:
