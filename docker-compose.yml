@@ -14,9 +14,9 @@ services:
     environment:
       DB_HOST: gao-mysql
       DB_PORT: 3306
-      DB_NAME: gao_db
-      DB_USER: gao_user
-      DB_PASSWORD: 1234
+      DB_NAME: ${DB_NAME:-mydb}
+      DB_USER: ${DB_USER:-user}
+      DB_PASSWORD: ${DB_PASSWORD:-1234}
       STUDENT_SOURCE_TABLE: users
       STUDENT_SOURCE_ORDER_BY: user_id
       ANALYSIS_RESULT_TABLE: student_analysis_results

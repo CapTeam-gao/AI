@@ -1,10 +1,15 @@
 import json
 import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pymysql
+from dotenv import load_dotenv
 from pymysql.err import MySQLError
 from pymysql.cursors import DictCursor
+
+
+load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
 
 
 def _env(name: str, default: str) -> str:
@@ -236,6 +241,85 @@ def fetch_analysis_results() -> Optional[List[Dict[str, Any]]]:
     if isinstance(result, list):
         return result
     return None
+
+
+def fetch_analysis_results_for_students(
+    students: List[Dict[str, Any]],
+    row_limit: int = 100,
+) -> List[Dict[str, Any]]:
+    """Return the newest cached analysis for each requested student."""
+    if not students:
+        return []
+
+    requested_ids = {
+        student_id
+        for student in students
+        if (student_id := (
+            student.get("user_id")
+            or student.get("userId")
+            or student.get("student_id")
+            or student.get("studentId")
+        ))
+    }
+    requested_names = {
+        student.get("name")
+        for student in students
+        if student.get("name")
+    }
+
+    if os.getenv("ANALYSIS_RESULT_SQL"):
+        batches = [fetch_analysis_results() or []]
+    else:
+        table = _env("ANALYSIS_RESULT_TABLE", "student_analysis_results")
+        sql = f"""
+        SELECT result_json
+        FROM `{table}`
+        WHERE result_type = 'analysis'
+        ORDER BY id DESC
+        LIMIT %s
+        """
+        with get_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (max(1, int(row_limit)),))
+                rows = cursor.fetchall()
+        batches = []
+        for row in rows:
+            payload = _extract_json_from_row(row)
+            if isinstance(payload, dict) and isinstance(payload.get("results"), list):
+                payload = payload["results"]
+            if isinstance(payload, list):
+                batches.append(payload)
+
+    cached_by_id: Dict[str, Dict[str, Any]] = {}
+    cached_by_name: Dict[str, Dict[str, Any]] = {}
+    for batch in batches:
+        for result in batch:
+            if not isinstance(result, dict):
+                continue
+            result_id = (
+                result.get("user_id")
+                or result.get("userId")
+                or result.get("student_id")
+                or result.get("studentId")
+            )
+            result_name = result.get("name")
+            if result_id in requested_ids:
+                cached_by_id.setdefault(result_id, result)
+            if result_name in requested_names:
+                cached_by_name.setdefault(result_name, result)
+
+    ordered_results = []
+    for student in students:
+        student_id = (
+            student.get("user_id")
+            or student.get("userId")
+            or student.get("student_id")
+            or student.get("studentId")
+        )
+        result = cached_by_id.get(student_id) or cached_by_name.get(student.get("name"))
+        if result:
+            ordered_results.append(result)
+    return ordered_results
 
 
 def save_analysis_results(results: List[Dict[str, Any]]) -> None:
