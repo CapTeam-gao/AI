@@ -14,10 +14,24 @@ from matching_student.workflow_matching_student import (
     get_technical_score,
     validation_balance_team,
 )
-from student_analysis.analysis_llm import StudentAnalysis, cap_stack_score, normalize_analysis
+from student_analysis.analysis_llm import (
+    StudentAnalysis,
+    cap_stack_score,
+    get_prompt_chain,
+    normalize_analysis,
+)
 
 
 class StudentSkillLevelTest(unittest.TestCase):
+    def test_reason_prompt_is_written_for_admin_without_internal_scoring_terms(self):
+        reason_description = StudentAnalysis.model_json_schema()["properties"]["reason"]["description"]
+        system_prompt = get_prompt_chain().messages[0].prompt.template
+
+        self.assertIn("관리자인 교사", reason_description)
+        self.assertIn("실제로 구현한 내용", system_prompt)
+        self.assertIn("skill_level, stack_score 같은 필드명을 reason에 쓰지 마라", system_prompt)
+        self.assertIn("기술별 점수", system_prompt)
+
     def test_new_skill_levels_are_supported_by_structured_output(self):
         for level in ("상", "중상", "중", "중하", "하"):
             result = StudentAnalysis(

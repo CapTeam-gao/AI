@@ -14,7 +14,7 @@ from langchain_core.output_parsers import StrOutputParser
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Literal, Optional
 
-from capteam_db import fetch_analysis_results, fetch_students, save_analysis_results
+from capteam_db import fetch_analysis_results_for_students, fetch_students, save_analysis_results
 from capteam_preferences import ensure_preference_profile, ensure_preference_profiles
 from capteam_traits import ensure_trait_profile
 
@@ -36,6 +36,7 @@ llm = ChatOpenAI(
     reasoning_effort=os.getenv("OPENAI_ANALYSIS_REASONING_EFFORT", "medium"),
     timeout=int(os.getenv("OPENAI_TIMEOUT", "120")),
     max_retries=int(os.getenv("OPENAI_MAX_RETRIES", "2")),
+    temperature = 0
 )
 
 
@@ -149,6 +150,15 @@ skill_level 판정:
 - skill_level의 기준을 만족하는 직접적인 경험 근거가 student_data에 있는지 확인하라.
 - 기술 이름이나 표현의 인상만으로 상위 등급을 선택했다면 실제 수행 범위에 맞게 낮춰라.
 
+관리자용 reason 작성 규칙:
+- reason은 학생의 역량을 확인하는 교사가 읽는 설명이다. AI의 채점 과정을 보여주지 마라.
+- 3~4문장으로 작성하고, 실제로 구현한 내용, 팀에서 맡을 수 있는 업무, 아직 확인되지 않은 경험이나 보완점 순서로 설명하라.
+- skill_level, stack_score 같은 필드명을 reason에 쓰지 마라.
+- '상', '중상', '중', '중하', '하' 등급을 reason에 쓰거나 등급끼리 비교하지 마라.
+- 기술별 점수, 점수 차이, 점수를 정한 과정은 reason에 쓰지 마라.
+- '엄격하게 보면', '과대평가하면 안 된다', '상위 숙련 근거' 같은 채점자 관점의 표현을 쓰지 마라.
+- 전문 용어가 필요하면 학생이 실제로 한 행동과 결과를 함께 적어 쉽게 이해할 수 있게 하라.
+
 student_data : {student_data}
 """
 
@@ -165,14 +175,20 @@ student_data : {student_data}
 
     return s_prompt
 
-
+#stack_score를 뺄지말지 생각좀 해봐야할듯 구현경험으로는 stack_score를 명확하게 판단할 수 없는거 같음
 
 class StudentAnalysis(BaseModel):
     # 설명을 아무리 해줘도 제일 높은 skill_level에 조금이라도 해당 되면 지금 그냥 제일 높게 쳐주는거 같음 이분을 해결할수 있는 방법을 찾아야함.
     name : str = Field(description="student_data의 name을 그대로 여기에 작성하시오.")
     strength: str = Field(description="student_data의 stack, experience를 기반으로 학생의 핵심 강점")
     weakness: str = Field(description="student_data의 stack, experience를 기반으로 학생의 부족한 부분")
-    reason: str = Field(description="strength와 weakness와 그렇게 평가한 이유")
+    reason: str = Field(description="""
+    관리자인 교사가 학생의 현재 역량을 쉽게 이해할 수 있는 3~4문장의 설명.
+    첫째, experience에서 확인된 실제 구현 내용을 설명한다.
+    둘째, 팀 프로젝트에서 맡을 수 있는 구체적인 업무를 설명한다.
+    셋째, 입력에서 아직 확인되지 않은 경험이나 보완할 부분을 설명한다.
+    내부 필드명, 5단계 등급 이름, 기술 점수, 등급과 점수의 산정 과정은 절대 적지 마라.
+    """)
     stack_score: str = Field(description="""
     student_data의 stack에 있는 각 기술 스택별 숙련도를 10점 만점으로 평가한다.
     점수는 기술 이름의 난이도가 아니라, experience에 드러난 실제 사용 깊이와 구현 난이도를 기준으로 한다.
@@ -344,6 +360,70 @@ def _get_cached_analysis_for_students(
     ])
 
 
+BACKEND_LEVEL_TO_SKILL_LEVEL = {
+    "UPPER": "상",
+    "MIDDLE_UPPER": "중상",
+    "MIDDLE": "중",
+    "MIDDLE_LOWER": "중하",
+    "LOWER": "하",
+}
+
+
+def _student_identifier(student: Dict[str, Any]) -> Optional[str]:
+    return (
+        student.get("user_id")
+        or student.get("userId")
+        or student.get("student_id")
+        or student.get("studentId")
+    )
+
+
+def _embedded_analysis(student: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    analysis_result = student.get("analysis_result") or student.get("analysisResult")
+    student_level = student.get("skill_level") or student.get("student_level") or student.get("studentLevel")
+    if not analysis_result or not student_level:
+        return None
+
+    skill_level = BACKEND_LEVEL_TO_SKILL_LEVEL.get(str(student_level).upper(), student_level)
+    return {
+        "name": student.get("name"),
+        "strength": student.get("strength") or analysis_result,
+        "weakness": student.get("weakness") or "추가 프로젝트 경험을 통해 역량을 구체적으로 확인할 필요가 있습니다.",
+        "reason": analysis_result,
+        "stack_score": student.get("stack_score") or student.get("stackScore") or "",
+        "skill_level": skill_level,
+        "role": student.get("role") or student.get("goal") or "",
+        "suggestion": student.get("suggestion") or "다른 역할군의 팀원과 협업하는 구성이 적합합니다.",
+        "analysis_status": "SUCCESS",
+    }
+
+
+def _resolve_reusable_analyses(
+    students: List[Dict[str, Any]],
+    cached_results: List[Dict[str, Any]],
+) -> Dict[int, Dict[str, Any]]:
+    cached_by_id = {
+        identifier: result
+        for result in cached_results
+        if (identifier := _student_identifier(result))
+    }
+    cached_by_name = {
+        result.get("name"): result
+        for result in cached_results
+        if result.get("name")
+    }
+
+    reusable = {}
+    for index, student in enumerate(students):
+        cached = cached_by_id.get(_student_identifier(student)) or cached_by_name.get(student.get("name"))
+        source = cached or _embedded_analysis(student)
+        if source:
+            normalized = normalize_analysis(source, student)
+            normalized["analysis_status"] = source.get("analysis_status", "SUCCESS")
+            reusable[index] = normalized
+    return reusable
+
+
 def get_analyze_stu(students: Optional[List[Dict[str, Any]]] = None):
     # 이미 분석 결과 있으면 재사용
     # 테스트할때 토큰 아낄려고 사용하는건데 나중에 진짜 완성하면 있어도 그냥 덮어씌우는 형태로 갈듯
@@ -355,22 +435,28 @@ def get_analyze_stu(students: Optional[List[Dict[str, Any]]] = None):
     if not datas:
         raise RuntimeError("분석할 학생 데이터가 없습니다.")
 
+    results_by_index: Dict[int, Dict[str, Any]] = {}
     if not force_reanalyze:
-        cached_results = fetch_analysis_results()
-        normalized_results = _get_cached_analysis_for_students(cached_results, datas)
+        cached_results = fetch_analysis_results_for_students(datas)
+        results_by_index = _resolve_reusable_analyses(datas, cached_results)
 
-        if normalized_results:
-            print("기존 분석 결과를 MySQL에서 불러오는 중...")
-            save_analysis_results(normalized_results)
-            return normalized_results
+    pending_indices = [index for index in range(len(datas)) if index not in results_by_index]
+    if not pending_indices:
+        results = ensure_preference_profiles([results_by_index[index] for index in range(len(datas))])
+        print(f"기존 학생 분석 {len(results)}명을 재사용합니다.")
+        save_analysis_results(results)
+        return results
 
-    print("분석 결과 없음. 새로 분석 시작...")
+    print(
+        f"기존 학생 분석 {len(results_by_index)}명을 재사용하고 "
+        f"미분석 학생 {len(pending_indices)}명만 새로 분석합니다."
+    )
     model = get_llm()
     s_prompt = get_prompt_chain()
     structured_llm = model.with_structured_output(StudentAnalysis)
     chain = s_prompt | structured_llm 
-    results = []
-    for student in datas:
+    for index in pending_indices:
+        student = datas[index]
         print("="*55, flush=True)
         print(f"분석 시작: {student['name']}", flush=True)
 
@@ -388,18 +474,18 @@ def get_analyze_stu(students: Optional[List[Dict[str, Any]]] = None):
             failed_response = build_failed_analysis(student, error)
             print(f"분석 실패 상태로 저장: {student['name']}")
             print(failed_response)
-            results.append(failed_response)
+            results_by_index[index] = failed_response
             continue
 
         print(f"이름: {student['name']}")
         normalized_response = normalize_analysis(response, student)
         normalized_response["analysis_status"] = "SUCCESS"
         print(normalized_response)
-        results.append(normalized_response)
+        results_by_index[index] = normalized_response
         #리스트만들어서 답변나오면 그리스트 안에 들어가는 형식으로 이 만든걸 matching하는 llm에게 넘김.
         # 분석 결과 저장
 
-    results = ensure_preference_profiles(results)
+    results = ensure_preference_profiles([results_by_index[index] for index in range(len(datas))])
     save_analysis_results(results)
 
     print("분석 결과 MySQL 저장 완료")
