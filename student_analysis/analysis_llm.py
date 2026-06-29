@@ -402,6 +402,35 @@ def _embedded_analysis(student: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     }
 
 
+def _normalized_input_list(value: Any) -> List[str]:
+    if value is None:
+        return []
+    items = value if isinstance(value, list) else [value]
+    return sorted(
+        str(item).strip().casefold()
+        for item in items
+        if str(item).strip()
+    )
+
+
+def _cache_matches_student_input(cached: Dict[str, Any], student: Dict[str, Any]) -> bool:
+    if _normalized_input_list(cached.get("stack")) != _normalized_input_list(student.get("stack")):
+        return False
+    if _normalized_input_list(cached.get("experience")) != _normalized_input_list(student.get("experience")):
+        return False
+
+    cached_role = cached.get("role") or cached.get("goal")
+    student_role = student.get("role") or student.get("goal")
+    if cached_role and student_role and str(cached_role).strip().casefold() != str(student_role).strip().casefold():
+        return False
+
+    cached_grade = cached.get("grade")
+    student_grade = student.get("grade")
+    if cached_grade and student_grade and str(cached_grade).strip().upper() != str(student_grade).strip().upper():
+        return False
+    return True
+
+
 def _resolve_reusable_analyses(
     students: List[Dict[str, Any]],
     cached_results: List[Dict[str, Any]],
@@ -420,7 +449,10 @@ def _resolve_reusable_analyses(
     reusable = {}
     for index, student in enumerate(students):
         cached = cached_by_id.get(_student_identifier(student)) or cached_by_name.get(student.get("name"))
-        source = cached or _embedded_analysis(student)
+        if cached:
+            source = cached if _cache_matches_student_input(cached, student) else None
+        else:
+            source = _embedded_analysis(student)
         if source:
             normalized = normalize_analysis(source, student)
             normalized["analysis_status"] = source.get("analysis_status", "SUCCESS")
@@ -428,13 +460,17 @@ def _resolve_reusable_analyses(
     return reusable
 
 
-def get_analyze_stu(students: Optional[List[Dict[str, Any]]] = None):
+def get_analyze_stu(
+    students: Optional[List[Dict[str, Any]]] = None,
+    force_reanalyze: Optional[bool] = None,
+):
     # 이미 분석 결과 있으면 재사용
     # 테스트할때 토큰 아낄려고 사용하는건데 나중에 진짜 완성하면 있어도 그냥 덮어씌우는 형태로 갈듯
     #원래 사이즈 안보고 그냥 파일 존재 여부만보고 안에 내용이 있든지 말든지 신경안쓰고 해서 오류가 났었는데 안에 size가 있으면 기존결과대로 유지되고
     #size가 없으면 새로 분석하는그런 로직임.
     datas = students if students is not None else get_data()
-    force_reanalyze = os.getenv("FORCE_REANALYZE", "false").lower() == "true"
+    if force_reanalyze is None:
+        force_reanalyze = os.getenv("FORCE_REANALYZE", "false").lower() == "true"
 
     if not datas:
         raise RuntimeError("분석할 학생 데이터가 없습니다.")
