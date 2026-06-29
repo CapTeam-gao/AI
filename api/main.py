@@ -621,7 +621,10 @@ def teams_summary():
 def run_analysis(students: Optional[List[Dict[str, Any]]] = Body(default=None)):
     from student_analysis.analysis_llm import get_analyze_stu
 
-    results = get_analyze_stu(normalize_request_students(students))
+    results = get_analyze_stu(
+        normalize_request_students(students),
+        force_reanalyze=True,
+    )
     response_results = [build_analysis_response_result(result) for result in results]
     return {
         "status": "ok",
