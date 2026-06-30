@@ -17,7 +17,7 @@ if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", "..", ".env"), override=False)
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"), override=True)
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"), override=False)
 
 from capteam_db import fetch_analysis_results, fetch_matching_result, fetch_students, save_matching_result
 
@@ -46,10 +46,10 @@ from capteam_traits import (
 )
 #역할을 다양하게 균형 잡힌 팀 1순위 , 선호팀원 2순위 
 # OpenAI Chat 모델 객체를 생성해서 반환한다.
-# 기본값은 배정 이유/팀 분석 품질을 위해 gpt-5-mini를 쓰고,
+# 기본값은 학생 분석 모델과 동일한 gpt-5.4를 쓰고,
 # OPENAI_MATCHING_MODEL 환경변수로 쉽게 교체할 수 있게 둔다.
 def get_llm(model=None):
-    model = model or os.getenv("OPENAI_MATCHING_MODEL", "gpt-5-mini")
+    model = model or os.getenv("OPENAI_MATCHING_MODEL", "gpt-5.4")
     kwargs = {
         "model": model,
         "timeout": int(os.getenv("OPENAI_TIMEOUT", "120")),

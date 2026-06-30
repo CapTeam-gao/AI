@@ -48,13 +48,13 @@ class StudentSkillLevelTest(unittest.TestCase):
 
     def test_stack_score_caps_support_new_and_legacy_levels(self):
         expected_caps = {
-            "상": 10,
-            "중상": 8,
-            "중": 7,
-            "중하": 6,
+            "상": 9,
+            "중상": 7,
+            "중": 6,
+            "중하": 5,
             "하": 4,
-            "높음": 10,
-            "보통": 7,
+            "높음": 9,
+            "보통": 6,
             "낮음": 4,
         }
 
@@ -111,7 +111,7 @@ class StudentSkillLevelTest(unittest.TestCase):
         normalized = normalize_analysis(response, student)
 
         self.assertEqual(normalized["skill_level"], "보통")
-        self.assertEqual(normalized["stack_score"], "Java: 7점")
+        self.assertEqual(normalized["stack_score"], "Java: 6점")
 
     def test_backend_level_mapping_uses_five_level_contract(self):
         self.assertEqual(to_backend_student_level("상"), "UPPER")
