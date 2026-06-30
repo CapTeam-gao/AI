@@ -2165,7 +2165,11 @@ def build_team_analysis_context(final_teams, analyzed_students):
 # 팀 이름, reason_cards, 호환용 reason 문자열을 검증한다.
 class FinalTeamReasonCards(BaseModel):
     team_name: str = Field(description="reason_cards를 생성할 팀 이름")
-    reason_cards: List[ReasonCard] = Field(description="팀에서 가장 설득력 있는 배정 이유 카드 최소 2개, 최대 3개")
+    reason_cards: List[ReasonCard] = Field(
+        min_length=2,
+        max_length=4,
+        description="팀에서 가장 설득력 있는 배정 이유 카드 최소 2개, 최대 4개",
+    )
     reason: str = Field(description="reason_cards의 description들을 공백으로 이어 붙인 호환용 요약 설명")
 
 
@@ -2404,15 +2408,17 @@ def get_final_reason_cards_prompt_chain():
     팀원 배정은 이미 끝났으므로 팀원, 팀 수, 팀 이름, 팀장, 역할 분포를 절대 바꾸지 않는다.
     이 작업은 규칙 기반 fallback 문구를 대체하기 위한 최종 사용자 노출 문구 작성이다.
     절대 알고리즘 설명처럼 쓰지 말고, 실제 관리자가 납득할 수 있는 자연스러운 존댓말 문장으로 작성한다.
-    핵심은 matching_evidence와 member_profiles를 비교해 이 팀에서 가장 설득력 있는 배정 이유를 최소 2개, 필요하면 3개까지 고르는 것이다.
+    핵심은 matching_evidence와 member_profiles를 비교해 이 팀에서 가장 설득력 있는 배정 이유를 기본 3개 고르는 것이다.
+    서로 다른 강한 근거가 충분하면 4개까지 작성하고, 근거가 부족하면 억지로 늘리지 말고 2개만 작성한다.
     matching_evidence에는 알고리즘 초안, 점수 합계, 검증 결과가 없으므로 그런 값을 근거로 쓰지 않는다.
     근거가 약한 리더십/역할 균형/기술 조합 카드를 억지로 만들지 않는다.
 
     출력 규칙:
     - 반드시 지정된 structured output schema에 맞춰 출력한다.
     - teams의 각 항목은 team_name, reason_cards, reason만 포함한다.
-    - 각 팀의 reason_cards는 최소 2개 작성한다.
-    - 서로 다른 강한 근거가 3개 있으면 reason_cards를 3개까지 작성할 수 있다.
+    - 각 팀의 reason_cards는 기본 3개 작성한다.
+    - 서로 다른 강한 근거가 충분하면 4개까지 작성할 수 있다.
+    - 설득력 있는 근거가 부족하면 반복하거나 추측하지 말고 2개만 작성한다.
     - reason_cards의 title은 팀의 가장 강한 배정 근거를 구체적으로 드러낸다. 예: 선호 관계와 역할 균형을 함께 살린 팀, AI 결과를 서비스 기능으로 연결하기 좋은 팀, 프론트엔드와 앱 구현 부담을 나눌 수 있는 팀, 백엔드와 데이터 흐름을 안정적으로 맡길 수 있는 팀.
     - "리더십 중심의 팀 운영 가능", "팀장 희망을 반영한 운영 중심 팀"은 팀장 희망 반영이 이 팀의 가장 중요한 이유일 때만 사용한다.
     - 각 description은 제목을 반복하지 말고 130~220자 정도의 2~3문장으로 작성한다.
@@ -2420,7 +2426,7 @@ def get_final_reason_cards_prompt_chain():
     - 절대 쓰면 안 되는 종결: "한다", "된다", "높인다", "해소한다", "유지한다", "기대된다", "가능하다", "충족시킨다".
     - 절대 쓰면 안 되는 표현: "알고리즘", "규칙 기반", "fallback", "점수 기준", "균형 계산", "시너지 극대화", "동시에 만족", "품질을 높인다".
     - 각 reason_card는 서로 다른 배정 근거를 담는다. 같은 말을 제목만 바꿔 반복하지 않는다.
-    - 두 카드 중 최소 1개는 matching_evidence.key_placements 또는 preference.matched를 반영한다.
+    - 카드 중 최소 1개는 matching_evidence.key_placements 또는 preference.matched를 반영한다.
     - 최소 1개는 matching_evidence.implementation_connections를 반영해 역할 간 구현 흐름을 설명한다.
     - preference.matched가 있으면 선호 관계를 우선 검토하되, 역할 균형이나 구현 연결이 약하면 억지로 쓰지 않는다.
     - leader_selection은 보조 근거다. 팀장 희망이 실제 팀 운영상 핵심 장점일 때만 한 문장 이내로 언급한다.
@@ -2452,7 +2458,8 @@ def get_final_reason_cards_prompt_chain():
     {reason_context}
 
     요청:
-    위 최종 팀 구성은 확정된 결과다. 팀원을 바꾸지 말고 각 팀에서 가장 괜찮은 매칭 이유 reason_cards를 최소 2개, 필요하면 3개까지 작성해라.
+    위 최종 팀 구성은 확정된 결과다. 팀원을 바꾸지 말고 각 팀에서 가장 괜찮은 매칭 이유 reason_cards를 기본 3개 작성해라.
+    서로 다른 강한 근거가 충분하면 4개까지 작성하고, 근거가 부족하면 2개만 작성해라.
     """
 
     return ChatPromptTemplate.from_messages([
