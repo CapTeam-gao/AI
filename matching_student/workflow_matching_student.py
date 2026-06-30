@@ -2,6 +2,7 @@ from typing import Any,List,TypedDict,Dict,Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import copy
 import os
+import sys
 import json
 import math
 import re
@@ -10,8 +11,13 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
+
+BASE_DIR = Path(__file__).resolve().parents[1]
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", "..", ".env"), override=False)
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"), override=True)
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"), override=False)
 
 from capteam_db import fetch_analysis_results, fetch_matching_result, fetch_students, save_matching_result
 
@@ -40,10 +46,10 @@ from capteam_traits import (
 )
 #역할을 다양하게 균형 잡힌 팀 1순위 , 선호팀원 2순위 
 # OpenAI Chat 모델 객체를 생성해서 반환한다.
-# 기본값은 배정 이유/팀 분석 품질을 위해 gpt-5-mini를 쓰고,
+# 기본값은 학생 분석 모델과 동일한 gpt-5.4를 쓰고,
 # OPENAI_MATCHING_MODEL 환경변수로 쉽게 교체할 수 있게 둔다.
 def get_llm(model=None):
-    model = model or os.getenv("OPENAI_MATCHING_MODEL", "gpt-5-mini")
+    model = model or os.getenv("OPENAI_MATCHING_MODEL", "gpt-5.4")
     kwargs = {
         "model": model,
         "timeout": int(os.getenv("OPENAI_TIMEOUT", "120")),
@@ -72,10 +78,16 @@ class MatchingState(TypedDict):
 #검증할때 실패하면 다시 알고리즘 보고 할수있도록 알고리즘은 그대로 두고 llm_result만 계속 덮어 씌어지면서 수정
 
 # skill_level을 팀 생성용 숫자 점수로 바꾸기 위한 기준.
-# 팀 간 실력 균형을 맞추려면 "보통", "낮음" 같은 문자열보다 숫자가 다루기 편함.
+# 팀 간 실력 균형을 맞추려면 5단계 문자열보다 숫자가 다루기 편함.
 SKILL_LEVEL_SCORE = {
-    "높음": 3,
-    "보통": 2,
+    "상": 5,
+    "중상": 4,
+    "중": 3,
+    "중하": 2,
+    "하": 1,
+    # 기존 3단계 분석 캐시 호환
+    "높음": 5,
+    "보통": 3,
     "낮음": 1,
 }
 
@@ -165,7 +177,7 @@ def get_technical_score(student):
     # 학생 한 명의 기술 점수 계산.
     # skill_level을 큰 기준으로 보고, stack_score 평균을 보조 점수로 더함.
     level_score = SKILL_LEVEL_SCORE.get(student.get('skill_level'),1)
-    #ex skill_level이 보통이면 skill_level_score에서 보통에 value가 2여서 2를 저장
+    # 신규 5단계와 기존 3단계 모두 위 점수표로 변환한다.
     stack_score = parse_stack_score(student.get('stack_score',""))
     #stack_score가져와서 함수써서 숫자만 추출함 없으면 빈 문자열.
     return level_score * 10 + stack_score
@@ -785,7 +797,7 @@ def get_matching_prompt_chain():
 역할:
 - 알고리즘 초안을 기본 정답으로 보고, 자연어 분석상 명확히 더 좋은 조합이 있을 때만 최소한으로 보정한다.
 - 보정이 필요하지 않으면 initial_teams를 그대로 유지하고 이유만 설명한다.
-- 팀별 총점, 역할 다양성, 낮음 학생의 지원 가능성을 함께 본다.
+- 팀별 총점, 역할 다양성, 하위 등급 학생의 지원 가능성을 함께 본다.
 - 성격 성향과 개발 성향 점수는 팀 보완 관계를 판단할 때 사용하되, reason에는 숫자 점수를 직접 쓰지 않는다.
 - preferred_members는 강하게 고려하되, 점수/역할군/성향 균형을 깨면 선호를 분리할 수 있다.
 
@@ -794,7 +806,7 @@ def get_matching_prompt_chain():
 - 팀 수는 initial_teams의 팀 수와 동일하게 유지한다.
 - 각 팀 인원 차이는 1명 이하를 유지한다.
 - 팀 총점 차이를 크게 악화시키는 재배정은 하지 않는다.
-- 낮음 학생은 가능하면 보통 또는 높음 학생과 함께 둔다.
+- 하 또는 낮음 학생은 가능하면 중 이상의 학생과 함께 둔다.
 - 같은 role_group만으로 구성된 팀은 가능하면 피하되, game 역할군은 프로젝트 특성상 가능한 같은 팀에 유지한다.
 - suggestion, strength, weakness는 내부 판단 근거로만 사용하고 reason에 학생별 분석문을 옮겨 쓰지 않는다.
 - 성향/개발 점수는 전체 점수표처럼 나열하지 말고, 낮은 성향을 높은 성향의 팀원이 보완하는 관계를 설명할 때만 사용한다.
@@ -1090,8 +1102,12 @@ def validation_balance_team(candidate_result, analyzed_students, base_teams=None
         elif team_status["member_count"] > 5:
             team_errors.append(f"팀 인원이 5명을 초과했습니다. member_count={team_status['member_count']}")
 
-        if team_status["skill_levels"].get("낮음", 0) == team_status["member_count"]:
-            team_warnings.append("낮음 학생만으로 구성된 팀입니다.")
+        lower_level_count = (
+            team_status["skill_levels"].get("하", 0)
+            + team_status["skill_levels"].get("낮음", 0)
+        )
+        if lower_level_count == team_status["member_count"]:
+            team_errors.append("하위 등급 학생만으로 구성된 팀입니다.")
 
         only_role_group = next(iter(team_status["role_groups"]), None)
         if (
@@ -1188,7 +1204,7 @@ def validation_balance_team(candidate_result, analyzed_students, base_teams=None
     hard_score_gap = max(30, average_score * 0.45) if average_score else 0
 
     if team_scores and score_gap > hard_score_gap:
-        warnings.append(
+        errors.append(
             f"팀 점수 차이가 허용 범위를 크게 초과합니다. gap={score_gap}, hard_max={round(hard_score_gap, 2)}"
         )
     elif team_scores and score_gap > soft_score_gap:
@@ -1590,7 +1606,7 @@ def get_adjust_team_prompt_chain():
     - 팀 수는 algorithm_teams와 동일하게 유지한다.
     - 팀별 인원 차이는 1명 이하로 유지한다.
     - 팀 총점 차이를 크게 악화시키지 않는다.
-    - 낮음 학생은 가능하면 보통 또는 높음 학생과 함께 둔다.
+    - 하 또는 낮음 학생은 가능하면 중 이상의 학생과 함께 둔다.
     - 같은 role_group만으로 구성된 팀은 가능하면 피하되, game 역할군은 프로젝트 특성상 가능한 같은 팀에 유지한다.
     - preferred_members는 강하게 고려하되, 점수/역할군/성향 균형을 깨면 선호를 분리할 수 있다.
     - 팀 안에 wants_leader=true인 학생이 있으면 그 학생들 중 leader_score와 technical_score가 높은 학생을 팀장으로 추천한다.
@@ -2199,13 +2215,6 @@ def get_final_team_analysis_prompt_chain():
     - member_profiles의 response_reliability가 LOW인 학생은 성향 점수를 강한 근거로 쓰지 말고, 기술 스택, 구현 경험, 희망 역할을 중심으로 설명한다.
     - 현재 팀원이 아닌 학생 이름은 절대 언급하지 않는다.
 
-    좋은 strengths 예시:
-    - "김민수와 이서연은 서로 선호한 관계가 반영되어 초반 역할 조율을 빠르게 시작하기 좋은 조합입니다. 김민수의 API 구현 경험과 이서연의 화면 구성 능력이 만나 기능 흐름을 사용자 화면까지 자연스럽게 이어갈 수 있습니다."
-    - "팀장 희망을 표시한 박지훈을 중심으로 AI 실험 결과를 정리하고, 최유진의 앱 구현 역량으로 결과 확인 화면까지 연결하기 좋은 팀입니다. 모델 결과를 사용자가 확인하는 흐름까지 만들 수 있어 추천 기능을 서비스 형태로 보여주기 쉽습니다."
-
-    좋은 weaknesses 예시:
-    - "백엔드 구현을 맡을 학생이 적어 API 설계와 데이터 저장 흐름이 한쪽에 몰릴 수 있습니다. 초반에는 인증이나 부가 기능보다 핵심 API 명세를 먼저 정리해 프론트엔드 연동 지연을 줄이는 방식이 필요합니다."
-    - "화면 구현 경험이 상대적으로 부족해 결과를 사용자가 이해하기 쉬운 UI로 풀어내는 데 시간이 걸릴 수 있습니다. 따라서 복잡한 화면보다 결과 확인 중심의 단순한 흐름부터 구현하는 것이 안정적입니다."
     """
 
     user_prompt = """
@@ -2427,11 +2436,6 @@ def get_final_reason_cards_prompt_chain():
     - member_profiles의 response_reliability가 LOW인 학생은 성향 점수를 강한 배정 근거로 쓰지 않는다. 필요하면 "설문 응답 성향 정보는 참고 수준으로 활용하고 구현 경험과 희망 직군을 중심으로 배치했습니다."처럼 완곡하게 설명한다.
     - 숫자 점수는 되도록 쓰지 말고 "소통이 낮은 편", "책임감이 높은 편", "구현 경험이 풍부한 편"처럼 자연어로 표현한다.
     - reason은 reason_cards의 모든 description을 공백으로 이어 붙여 작성한다.
-
-    좋은 문장 예시:
-    - "김민수가 선호한 이서연을 같은 팀에 배치해 초반 요구사항 정리와 화면 흐름 조율을 빠르게 시작할 수 있습니다. 김민수의 API 구현 강점과 이서연의 화면 구성 능력이 만나 기능 흐름을 사용자 화면까지 자연스럽게 이어갈 수 있습니다."
-    - "팀장 희망을 표시한 박지훈을 운영 중심에 두고, 최유진의 앱 구현 역량을 연결해 분석 결과를 실제 모바일 기능으로 확장하기 좋습니다. 모델 결과를 사용자가 확인하는 흐름까지 만들 수 있어 같은 팀에 배정했습니다."
-    - "김성현은 핵심 기능 구현에 강점이 있고, 소통이 안정적인 팀원이 요구사항 정리와 일정 조율을 보완할 수 있습니다. 개발 속도와 협업 안정성을 함께 가져갈 수 있어 이 조합으로 매칭했습니다."
 
     나쁜 문장 예시:
     - "백엔드, 프론트엔드, 디자인, 앱, AI 역할이 고르게 배치되어 각 담당자가 맡은 범위에 집중하기 쉬운 구성입니다."

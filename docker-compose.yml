@@ -1,38 +1,35 @@
 services:
   ai-server:
-    image: ${AI_IMAGE:-ghcr.io/capteam-gao/ai:latest}
-    container_name: gao-ai-server
-    cpus: 1.5
+    build: .
+    container_name: ai-server
+    restart: unless-stopped
     ports:
       - "8000:8000"
-    depends_on:
-      - mysql
+    networks:
+      - default
+      - backend_internal
     environment:
-      DB_HOST: mysql
+      DB_HOST: gao-mysql
       DB_PORT: 3306
-      DB_NAME: mydb
-      DB_USER: root
-      DB_PASSWORD: 1234
-      STUDENT_SOURCE_TABLE: students
-      STUDENT_SOURCE_ORDER_BY: id
+      DB_NAME: ${DB_NAME:-gao_db}
+      DB_USER: ${DB_USER:-gao_user}
+      DB_PASSWORD: ${DB_PASSWORD:-1234}
+      STUDENT_SOURCE_TABLE: users
+      STUDENT_SOURCE_ORDER_BY: user_id
       ANALYSIS_RESULT_TABLE: student_analysis_results
       MATCHING_RESULT_TABLE: team_matching_results
       UPSTAGE_API_KEY: ${UPSTAGE_API_KEY}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
       UPSTAGE_API_BASE: https://api.upstage.ai/v1
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      LANGSMITH_TRACING: ${LANGSMITH_TRACING}
+      LANGSMITH_ENDPOINT: ${LANGSMITH_ENDPOINT}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY}
+      LANGSMITH_PROJECT: ${LANGSMITH_PROJECT}
+      LANGCHAIN_TRACING_V2: ${LANGSMITH_TRACING}
+      LANGCHAIN_ENDPOINT: ${LANGSMITH_ENDPOINT}
+      LANGCHAIN_API_KEY: ${LANGSMITH_API_KEY}
+      LANGCHAIN_PROJECT: ${LANGSMITH_PROJECT}
 
-  mysql:
-    image: mysql:8.0
-    container_name: gao-ai-mysql
-    restart: always
-    cpus: 0.5
-    environment:
-      MYSQL_ROOT_PASSWORD: 1234
-      MYSQL_DATABASE: mydb
-    ports:
-      - "4000:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
-
-volumes:
-  mysql_data:
+networks:
+  backend_internal:
+    external: true
