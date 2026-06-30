@@ -705,6 +705,63 @@ def build_trait_complements(members: List[Dict[str, Any]]) -> List[Dict[str, Any
     return complements[:6]
 
 
+PERSONALITY_REASON_TRAITS = {
+    "communication",
+    "responsibility",
+    "collaboration",
+    "flexibility",
+    "emotionalStability",
+}
+
+
+# 배정 이유에 사용할 신뢰 가능한 성격 성향 근거를 이름과 함께 정리한다.
+# LOW 신뢰도 응답은 제외하고 점수 대신 성향 라벨과 보완 관계만 전달한다.
+def build_personality_reason_evidence(members: List[Dict[str, Any]], limit: int = 3) -> Dict[str, Any]:
+    reliable_members = [
+        member
+        for member in members
+        if get_response_reliability(member) != "LOW"
+    ]
+    complements = []
+    for complement in build_trait_complements(reliable_members):
+        if complement.get("trait") not in PERSONALITY_REASON_TRAITS:
+            continue
+        complements.append({
+            "trait": complement.get("label"),
+            "member_to_support": (complement.get("low_member") or {}).get("name"),
+            "supporters": [
+                supporter.get("name")
+                for supporter in complement.get("supporters", [])
+                if supporter.get("name")
+            ],
+        })
+        if len(complements) >= limit:
+            break
+
+    strengths = []
+    for member in reliable_members:
+        personality_scores = member.get("personality_scores", {})
+        high_traits = [
+            {
+                "trait": TRAIT_LABELS.get(trait, trait),
+                "score": score,
+            }
+            for trait, score in personality_scores.items()
+            if trait in PERSONALITY_REASON_TRAITS and score >= 4
+        ]
+        high_traits.sort(key=lambda item: item["score"], reverse=True)
+        if high_traits:
+            strengths.append({
+                "name": member.get("name"),
+                "traits": [item["trait"] for item in high_traits[:2]],
+            })
+
+    return {
+        "complements": complements,
+        "strengths": strengths[: max(2, limit * 2)],
+    }
+
+
 # 후보 팀 결과와 학생 분석을 받아 이유 생성/보정용 팀 context를 만든다.
 # 팀별 멤버, 역할 분포, 대표 기술, 성향 보완 관계, 성향 평균을 담아 반환한다.
 def build_reason_context(candidate_result, analyzed_students):
@@ -2146,11 +2203,23 @@ def build_final_team_context(final_teams, analyzed_students, trait_complement_li
 # 최종 이유 카드 LLM에 넣을 팀별 context를 만든다.
 # 팀별 멤버, 리더, 학생 분석 근거, 공개 가능한 매칭 근거를 반환한다.
 def build_reason_card_context(final_teams, analyzed_students):
-    return build_final_team_context(
+    contexts = build_final_team_context(
         final_teams,
         analyzed_students,
         trait_complement_limit=3,
     )
+    student_lookup = build_student_lookup(analyzed_students)
+
+    for context in contexts:
+        members = [
+            student_lookup[name]
+            for name in context.get("members", [])
+            if name in student_lookup
+        ]
+        context.pop("trait_complements", None)
+        context["personality_evidence"] = build_personality_reason_evidence(members)
+
+    return contexts
 
 
 def build_team_analysis_context(final_teams, analyzed_students):
@@ -2165,7 +2234,11 @@ def build_team_analysis_context(final_teams, analyzed_students):
 # 팀 이름, reason_cards, 호환용 reason 문자열을 검증한다.
 class FinalTeamReasonCards(BaseModel):
     team_name: str = Field(description="reason_cards를 생성할 팀 이름")
-    reason_cards: List[ReasonCard] = Field(description="팀에서 가장 설득력 있는 배정 이유 카드 최소 2개, 최대 3개")
+    reason_cards: List[ReasonCard] = Field(
+        min_length=2,
+        max_length=4,
+        description="팀에서 가장 설득력 있는 배정 이유 카드 최소 2개, 최대 4개",
+    )
     reason: str = Field(description="reason_cards의 description들을 공백으로 이어 붙인 호환용 요약 설명")
 
 
@@ -2404,23 +2477,28 @@ def get_final_reason_cards_prompt_chain():
     팀원 배정은 이미 끝났으므로 팀원, 팀 수, 팀 이름, 팀장, 역할 분포를 절대 바꾸지 않는다.
     이 작업은 규칙 기반 fallback 문구를 대체하기 위한 최종 사용자 노출 문구 작성이다.
     절대 알고리즘 설명처럼 쓰지 말고, 실제 관리자가 납득할 수 있는 자연스러운 존댓말 문장으로 작성한다.
-    핵심은 matching_evidence와 member_profiles를 비교해 이 팀에서 가장 설득력 있는 배정 이유를 최소 2개, 필요하면 3개까지 고르는 것이다.
+    핵심은 matching_evidence, member_profiles, personality_evidence를 비교해 이 팀에서 가장 설득력 있는 배정 이유를 기본 3개 고르는 것이다.
+    서로 다른 강한 근거가 충분하면 4개까지 작성하고, 근거가 부족하면 억지로 늘리지 말고 2개만 작성한다.
     matching_evidence에는 알고리즘 초안, 점수 합계, 검증 결과가 없으므로 그런 값을 근거로 쓰지 않는다.
     근거가 약한 리더십/역할 균형/기술 조합 카드를 억지로 만들지 않는다.
 
     출력 규칙:
     - 반드시 지정된 structured output schema에 맞춰 출력한다.
     - teams의 각 항목은 team_name, reason_cards, reason만 포함한다.
-    - 각 팀의 reason_cards는 최소 2개 작성한다.
-    - 서로 다른 강한 근거가 3개 있으면 reason_cards를 3개까지 작성할 수 있다.
-    - reason_cards의 title은 팀의 가장 강한 배정 근거를 구체적으로 드러낸다. 예: 선호 관계와 역할 균형을 함께 살린 팀, AI 결과를 서비스 기능으로 연결하기 좋은 팀, 프론트엔드와 앱 구현 부담을 나눌 수 있는 팀, 백엔드와 데이터 흐름을 안정적으로 맡길 수 있는 팀.
+    - 각 팀의 reason_cards는 기본 3개 작성한다.
+    - 서로 다른 강한 근거가 충분하면 4개까지 작성할 수 있다.
+    - 설득력 있는 근거가 부족하면 반복하거나 추측하지 말고 2개만 작성한다.
+    - reason_cards의 title은 팀의 가장 강한 배정 근거를 구체적으로 드러낸다.
     - "리더십 중심의 팀 운영 가능", "팀장 희망을 반영한 운영 중심 팀"은 팀장 희망 반영이 이 팀의 가장 중요한 이유일 때만 사용한다.
     - 각 description은 제목을 반복하지 말고 130~220자 정도의 2~3문장으로 작성한다.
     - 모든 description 문장은 관리자 화면에 그대로 노출된다. 반드시 존댓말로 작성하고, 모든 문장 끝은 "-습니다", "-입니다", "-됩니다", "-합니다" 중 하나로 끝낸다.
     - 절대 쓰면 안 되는 종결: "한다", "된다", "높인다", "해소한다", "유지한다", "기대된다", "가능하다", "충족시킨다".
     - 절대 쓰면 안 되는 표현: "알고리즘", "규칙 기반", "fallback", "점수 기준", "균형 계산", "시너지 극대화", "동시에 만족", "품질을 높인다".
     - 각 reason_card는 서로 다른 배정 근거를 담는다. 같은 말을 제목만 바꿔 반복하지 않는다.
-    - 두 카드 중 최소 1개는 matching_evidence.key_placements 또는 preference.matched를 반영한다.
+    - personality_evidence에 두 명 이상의 신뢰 가능한 서로 다른 성향 정보가 있으면 성향 보완 또는 성향 강점 조합을 설명하는 카드를 반드시 1개 작성한다.
+    - 성향 카드는 구체적인 팀원 이름과 소통, 책임감, 협업, 유연성 같은 실제 라벨을 사용해 누가 어떤 부분을 보완하는지 설명한다.
+    - 성향이 모두 좋다는 식의 칭찬이나 성향만으로 성과를 단정하는 문장은 쓰지 않는다.
+    - 카드 중 최소 1개는 matching_evidence.key_placements 또는 preference.matched를 반영한다.
     - 최소 1개는 matching_evidence.implementation_connections를 반영해 역할 간 구현 흐름을 설명한다.
     - preference.matched가 있으면 선호 관계를 우선 검토하되, 역할 균형이나 구현 연결이 약하면 억지로 쓰지 않는다.
     - leader_selection은 보조 근거다. 팀장 희망이 실제 팀 운영상 핵심 장점일 때만 한 문장 이내로 언급한다.
@@ -2452,7 +2530,8 @@ def get_final_reason_cards_prompt_chain():
     {reason_context}
 
     요청:
-    위 최종 팀 구성은 확정된 결과다. 팀원을 바꾸지 말고 각 팀에서 가장 괜찮은 매칭 이유 reason_cards를 최소 2개, 필요하면 3개까지 작성해라.
+    위 최종 팀 구성은 확정된 결과다. 팀원을 바꾸지 말고 각 팀에서 가장 괜찮은 매칭 이유 reason_cards를 기본 3개 작성해라.
+    서로 다른 강한 근거가 충분하면 4개까지 작성하고, 근거가 부족하면 2개만 작성해라.
     """
 
     return ChatPromptTemplate.from_messages([
