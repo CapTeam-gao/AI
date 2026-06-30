@@ -4,7 +4,7 @@ import re
 import time
 from dotenv import load_dotenv
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", "..", ".env"), override=False)
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"), override=True)
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"), override=False)
 
 # from s_analysis_fewshot import examples
 from langchain_openai import ChatOpenAI
@@ -253,8 +253,8 @@ def cap_stack_score(stack_score, skill_level):
         "중상": 7,
         "상": 9,
         "낮음": 4,
-        "보통": 7,
-        "높음": 10,
+        "보통": 6,
+        "높음": 9,
         "LOWER": 4,
         "LOWER_MIDDLE": 5,
         "MIDDLE_LOWER": 5,
