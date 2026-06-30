@@ -1,4 +1,6 @@
 해야 할 일
+- 배포 ai-server 8000 포트 점유 원인 확인
+- ai-server 미기동이 설문 분석 실패로 이어지는 경로 정리
 - 로컬 uvicorn 재시작 후 /matching/run 500 해결 여부 재확인
 - 로컬 AI DB 연결을 gao-mysql/gao_db/gao_user로 변경하고 확인하기.
 - 학생분석 최적화와 팀 매칭 최적화.
