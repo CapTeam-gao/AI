@@ -353,7 +353,7 @@ def _get_cached_analysis_for_students(
     }
     student_names = [student.get("name") for student in students if student.get("name")]
 
-    if not student_names or any(name not in cached_by_name for name in student_names):
+    if len(student_names) != len(students) or any(name not in cached_by_name for name in student_names):
         return None
 
     return ensure_preference_profiles([
