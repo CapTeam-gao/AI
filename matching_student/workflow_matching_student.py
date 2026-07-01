@@ -73,6 +73,11 @@ class MatchingState(TypedDict):
     final_result:Dict[str,Any] #최종 결과 저장
     llm_result:Dict[str,Any] #llm이 생성한 매칭상태 저장
     iteration_count: int #팀 생성 수정한 횟수 저장하여 무한반복을 막음
+    best_candidate: Dict[str, Any] #일반 팀 생성에서 현재까지 검증 점수가 가장 좋은 후보
+    best_balance_result: Dict[str, Any] #최고 후보의 코드 검증 결과
+    best_team_evaluations: List[Dict[str, Any]] #최고 후보의 팀별 검증 결과
+    best_candidate_score: List[float] #후보 비교용 점수. 앞 값부터 낮을수록 좋음
+    last_adjustment_improved: bool #직전 LLM 수정안이 이전 최고 후보보다 개선됐는지 여부
 #team으로 알고리즘으로 team상태 저장하고
 #llm_result로 llm이 제안한 팀 상태 저장하고
 #검증할때 실패하면 다시 알고리즘 보고 할수있도록 알고리즘은 그대로 두고 llm_result만 계속 덮어 씌어지면서 수정
@@ -1499,6 +1504,107 @@ def evaluate_balance_node(state: MatchingState) -> Dict[str, Any]:
         "team_evaluations": team_evaluations,
     }
 
+
+# 일반 팀 생성 후보를 구조 오류, 전체 오류, 점수 격차, 선호 미반영, 경고 순서로 비교한다.
+# 반환 tuple은 앞 항목부터 낮을수록 더 좋은 후보다.
+def build_candidate_quality_score(
+    balance_result: Dict[str, Any],
+    expected_team_count: int,
+) -> tuple:
+    algorithm_result = balance_result.get("algorithm_result") or balance_result
+    member_counts = algorithm_result.get("member_counts", [])
+    team_count = int(algorithm_result.get("team_count", 0) or 0)
+    structural_error = bool(
+        algorithm_result.get("missing_names")
+        or algorithm_result.get("duplicate_names")
+        or algorithm_result.get("unknown_names")
+        or (expected_team_count and team_count != expected_team_count)
+        or any(count < 3 or count > 5 for count in member_counts)
+        or (member_counts and max(member_counts) - min(member_counts) > 1)
+    )
+    score_gap = float(algorithm_result.get("score_gap", 0) or 0)
+    hard_score_gap = float(algorithm_result.get("hard_score_gap", 0) or 0)
+    score_gap_excess = max(0.0, score_gap - hard_score_gap)
+
+    return (
+        int(structural_error),
+        len(algorithm_result.get("errors", [])),
+        round(score_gap_excess, 2),
+        len(algorithm_result.get("unmet_preference_pairs", [])),
+        len(algorithm_result.get("warnings", [])),
+    )
+
+
+# 알고리즘 팀 list와 LLM 결과 dict를 동일한 추적 형태로 맞춘다.
+def normalize_tracked_candidate(candidate: Any, source: str) -> Dict[str, Any]:
+    if isinstance(candidate, dict):
+        normalized = copy.deepcopy(candidate)
+    else:
+        normalized = {
+            "final_teams": copy.deepcopy(get_candidate_teams(candidate)),
+            "changed": False,
+            "change_summary": "규칙 기반 알고리즘 초안입니다.",
+            "validation_notes": "일반 팀 생성 후보 비교에서 알고리즘 초안이 선택되었습니다.",
+        }
+    normalized["candidate_source"] = source
+    return normalized
+
+
+# 일반 팀 생성에서만 알고리즘 초안과 모든 LLM 후보를 비교하고 최고 후보를 보존한다.
+# 재생성 워크플로우는 이 노드를 호출하지 않는다.
+def evaluate_normal_workflow_node(state: MatchingState) -> Dict[str, Any]:
+    evaluation_update = evaluate_balance_node(state)
+    balance_result = evaluation_update["balance_result"]
+    team_evaluations = evaluation_update["team_evaluations"]
+    expected_team_count = len(state.get("teams", []))
+    current_candidate = normalize_tracked_candidate(
+        state.get("llm_result") or state.get("teams", []),
+        "llm_candidate" if state.get("llm_result") else "algorithm",
+    )
+    current_score = build_candidate_quality_score(balance_result, expected_team_count)
+
+    best_candidate = state.get("best_candidate")
+    best_balance_result = state.get("best_balance_result")
+    best_team_evaluations = state.get("best_team_evaluations")
+    best_score = tuple(state.get("best_candidate_score") or [])
+
+    if not best_candidate:
+        algorithm_balance, algorithm_evaluations = validation_balance_team(
+            candidate_result=state.get("teams", []),
+            analyzed_students=state.get("analyzed_students", []),
+            base_teams=state.get("teams", []),
+        )
+        algorithm_score = build_candidate_quality_score(
+            algorithm_balance,
+            expected_team_count,
+        )
+        if algorithm_score < current_score:
+            best_candidate = normalize_tracked_candidate(state.get("teams", []), "algorithm")
+            best_balance_result = algorithm_balance
+            best_team_evaluations = algorithm_evaluations
+            best_score = algorithm_score
+        else:
+            best_candidate = current_candidate
+            best_balance_result = balance_result
+            best_team_evaluations = team_evaluations
+            best_score = current_score
+
+    improved = current_score < best_score
+    if improved:
+        best_candidate = current_candidate
+        best_balance_result = balance_result
+        best_team_evaluations = team_evaluations
+        best_score = current_score
+
+    return {
+        **evaluation_update,
+        "best_candidate": best_candidate,
+        "best_balance_result": best_balance_result,
+        "best_team_evaluations": best_team_evaluations,
+        "best_candidate_score": list(best_score),
+        "last_adjustment_improved": improved,
+    }
+
 #llm 검증로직
 #팀 하나에 대한 평가
 # LLM이 팀 하나의 정성 평가를 반환할 때 쓰는 schema다.
@@ -1629,6 +1735,19 @@ def should_adjust(state: MatchingState):
     if balance_result.get("is_balanced") and not balance_result.get("need_adjustment"):
         return "finalize_node"
     if state.get('iteration_count',0) >= MAX_ITERATION:
+        return "finalize_node"
+    return "adjust_team_node"
+
+
+# 일반 팀 생성은 직전 수정이 최고 후보를 갱신했을 때만 다음 LLM 수정을 허용한다.
+# 재생성 워크플로우는 기존 while 조건을 사용하므로 이 분기를 호출하지 않는다.
+def should_adjust_normal_workflow(state: MatchingState):
+    balance_result = state.get("balance_result", {})
+    if balance_result.get("is_balanced") and not balance_result.get("need_adjustment"):
+        return "finalize_node"
+    if state.get("iteration_count", 0) >= MAX_ITERATION:
+        return "finalize_node"
+    if state.get("iteration_count", 0) > 0 and not state.get("last_adjustment_improved", False):
         return "finalize_node"
     return "adjust_team_node"
 
@@ -2712,6 +2831,40 @@ def finalize_node(state: MatchingState) -> Dict[str, Any]:
         "final_result": final_result
     }
 
+
+# 일반 팀 생성에서 마지막 후보가 아니라 전체 후보 중 검증 점수가 가장 좋은 결과를 확정한다.
+# 기존 finalize_node를 그대로 재사용하되 재생성 경로의 동작은 변경하지 않는다.
+def finalize_normal_workflow_node(state: MatchingState) -> Dict[str, Any]:
+    best_candidate = state.get("best_candidate") or normalize_tracked_candidate(
+        state.get("llm_result") or state.get("teams", []),
+        "llm_candidate" if state.get("llm_result") else "algorithm",
+    )
+    best_balance_result = state.get("best_balance_result") or state.get("balance_result", {})
+    best_team_evaluations = state.get("best_team_evaluations") or state.get("team_evaluations", [])
+    iteration_count = state.get("iteration_count", 0)
+
+    if best_balance_result.get("is_balanced") and not best_balance_result.get("need_adjustment"):
+        finalized_by = "validation_passed"
+    elif iteration_count > 0 and not state.get("last_adjustment_improved", False):
+        finalized_by = "no_improvement"
+    elif iteration_count >= MAX_ITERATION:
+        finalized_by = "max_iteration"
+    else:
+        finalized_by = "manual_finalize"
+
+    # iteration_count를 0으로 전달해 기존 max-iteration fallback이 최고 후보를 덮어쓰지 않게 한다.
+    finalize_state = {
+        **state,
+        "llm_result": best_candidate,
+        "balance_result": best_balance_result,
+        "team_evaluations": best_team_evaluations,
+        "iteration_count": 0,
+    }
+    result = finalize_node(finalize_state)
+    result["final_result"]["iteration_count"] = iteration_count
+    result["final_result"]["finalized_by"] = finalized_by
+    return result
+
 #langgrph로 workflow형식으로 구축
 from langgraph.graph import StateGraph, START, END
 
@@ -2729,9 +2882,9 @@ workflow = StateGraph(MatchingState)
 #노드 추가.
 workflow.add_node('create_team_node',create_team_node) #알고리즘으로 팀 생성
 workflow.add_node('llm_analyzed',llm_analyzed) #llm으로 생성
-workflow.add_node('evaluate_balance_node',evaluate_balance_node) #팀 검증 노드
+workflow.add_node('evaluate_balance_node',evaluate_normal_workflow_node) #일반 팀 생성 전용 최고 후보 추적 검증 노드
 workflow.add_node('adjust_team_node',adjust_team_node) #팀 수정 노드
-workflow.add_node("finalize_node", finalize_node) #최종결과 노드
+workflow.add_node("finalize_node", finalize_normal_workflow_node) #일반 팀 생성 전용 최고 후보 확정 노드
 
 workflow.add_edge(START,'create_team_node')
 workflow.add_edge('create_team_node','llm_analyzed')
@@ -2739,7 +2892,7 @@ workflow.add_edge('llm_analyzed','evaluate_balance_node')
 
 workflow.add_conditional_edges(
     'evaluate_balance_node',
-    should_adjust,#조건 분기 함수 하나라도 수정필요면 adjust_team_node로 보내서 수정시킴.
+    should_adjust_normal_workflow,#개선될 때만 adjust_team_node로 보내서 추가 수정시킴.
     {
         'finalize_node' : 'finalize_node',
         'adjust_team_node' : 'adjust_team_node',
