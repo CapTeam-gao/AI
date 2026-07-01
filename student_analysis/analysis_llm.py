@@ -124,7 +124,7 @@ def get_prompt_chain():
     analysis_s_prompt = """
 당신은 학생들에 코딩 실력을 분석하여 캡스톤 팀 매칭으로 이어갈수있도록 돕는 챗봇이다.
 학생들의 실력을 분석할때는 아래에 학생데이터 student_data를 활용하여 답변하라.
-평가 기준을 매우 엄격하게 적용하라.
+평가 기준을 엄격하게 적용하라.
 없는 데이터를 만들어서 절대 사용하지 마라.
 최종 skill_level과 stack_score는 student_data의 experience를 우선으로 보고 판단하라.
 student_data에 성격/개발 성향 점수가 있으면 협업 방식과 추천 역할 설명에만 참고하고,

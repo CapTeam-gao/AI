@@ -1,4 +1,8 @@
 해야 할 일
+- 학생 분석이 과소평가되는 원인 확인
+- skill_level / stack_score 보수화 지점 정리
+- 중복 팀원 복구 후 6명/4명 불균형이 남는 repair_team_matching_result 경로 점검
+- matching_student/student_analysis 하위 테스트를 표준 실행 경로에서도 돌 수 있게 import 경로 정리
 - 배포 ai-server 8000 포트 점유 원인 확인
 - ai-server 미기동이 설문 분석 실패로 이어지는 경로 정리
 - 로컬 uvicorn 재시작 후 /matching/run 500 해결 여부 재확인
