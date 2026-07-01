@@ -1,4 +1,6 @@
 해야 할 일
+- 수정노드 진입 조건과 max_iteration 고정 원인 확인
+- balance_result / should_adjust 흐름 점검
 - 학생 분석이 과소평가되는 원인 확인
 - skill_level / stack_score 보수화 지점 정리
 - 중복 팀원 복구 후 6명/4명 불균형이 남는 repair_team_matching_result 경로 점검

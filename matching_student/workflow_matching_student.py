@@ -1665,7 +1665,11 @@ def get_adjust_team_prompt_chain():
     - 팀 총점 차이를 크게 악화시키지 않는다.
     - 하 또는 낮음 학생은 가능하면 중 이상의 학생과 함께 둔다.
     - 같은 role_group만으로 구성된 팀은 가능하면 피하되, game 역할군은 프로젝트 특성상 가능한 같은 팀에 유지한다.
-    - preferred_members는 강하게 고려하되, 점수/역할군/성향 균형을 깨면 선호를 분리할 수 있다.
+    - 팀 인원, 점수, 역할군, 성향 균형과 algorithm_result.errors 해결을 preferred_members보다 우선한다.
+    - 서로를 선택한 상호 선호 페어는 균형이 비슷한 대안 중에서 우선 유지한다.
+    - 역할군 이동이나 학생 교환 시 상호 선호 페어를 함께 이동해도 균형이 악화되지 않는지 먼저 검토한다.
+    - 선호를 유지하면 필수 오류가 남거나 팀 균형이 뚜렷하게 나빠지는 경우에는 분리할 수 있으며, 이유를 validation_notes에 쓴다.
+    - 단방향 preferred_members도 팀 균형을 해치지 않는 범위에서 고려한다.
     - 팀 안에 wants_leader=true인 학생이 있으면 그 학생들 중 leader_score와 technical_score가 높은 학생을 팀장으로 추천한다.
     - adjustment_history와 같은 수정 패턴을 반복하지 않는다.
 
@@ -1680,6 +1684,8 @@ def get_adjust_team_prompt_chain():
     - 성격성향/개발성향 점수는 팀 보완 관계를 판단할 때 사용하되, reason에는 숫자 점수를 직접 쓰지 않는다.
 
     계산 규칙:
+    - 역할군 응집 오류를 고칠 때 해당 역할군의 전체 학생 수, 현재 팀별 인원, 이동할 학생 수를 먼저 계산한다.
+    - 특정 역할군 전체를 한 팀에 모을 수 있으면 팀 균형과 선호 관계를 함께 비교해 오류가 남지 않는 배치를 선택한다.
     - 점수는 student_analysis 또는 algorithm_teams에 있는 score 값만 사용한다.
     - 새로운 점수나 skill_level을 만들지 않는다.
     - total_score는 최종 팀원의 score 합으로 작성한다.
@@ -1703,6 +1709,7 @@ def get_adjust_team_prompt_chain():
     user_prompt = """
     아래 검증 실패 정보를 바탕으로 팀 후보를 수정해라.
     algorithm_result.errors의 중복 배정, 누락 학생, 없는 이름, 팀 수 오류를 최우선으로 해결해라.
+    역할군 응집 오류는 전체 대상 인원과 팀 정원을 계산해 해결하되, 균형이 비슷한 대안이라면 상호 선호 페어를 유지해라.
     balance_result.llm_result.adjustment_request는 사용자 재생성 요청이다. 중복/누락/없는 이름/팀 수/인원 차이 규칙을 깨지 않는 범위에서 적극적으로 반영해라.
     사용자 요청을 완전히 반영할 수 없으면 가능한 대안을 적용하고 validation_notes에 반영하지 못한 이유를 써라.
     이 단계에서는 팀원 배정, 역할 분포, 팀장만 결정하고 배정 이유는 작성하지 마라.
