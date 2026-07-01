@@ -2680,7 +2680,7 @@ def normalize_current_team_member(member: Any) -> str:
 
 
 # 재생성 요청으로 들어온 팀 하나를 내부 표준 팀 구조로 변환한다.
-# 팀 이름, 멤버 이름, 총점, 역할 분포, 팀장, 기존 이유를 정규화한다.
+# 팀 이름, 멤버 이름, 총점, 역할 분포, 팀장만 유지하고 이전 이유 캐시는 버린다.
 def normalize_current_team(team: Dict[str, Any], index: int) -> Dict[str, Any]:
     members = [
         member_name
@@ -2697,7 +2697,8 @@ def normalize_current_team(team: Dict[str, Any], index: int) -> Dict[str, Any]:
         "total_score": float(team.get("total_score") or team.get("totalScore") or 0),
         "role_groups": normalize_role_groups_for_regenerate(team.get("role_groups") or team.get("roleCounts")),
         "leader": team.get("leader") or team.get("leaderName") or "",
-        "reason": team.get("reason") or team.get("matching_reason") or team.get("matchingReason") or "",
+        "reason": "",
+        "reason_cards": [],
     }
 
 
@@ -2750,7 +2751,9 @@ def build_regenerate_state(
     current_candidate_source = "request_current_teams" if current_candidate else ""
     if not current_candidate:
         cached_result = load_cached_matching_result(force_rematch=False) or {}
-        current_candidate = get_candidate_teams((cached_result.get("final_result") or cached_result))
+        current_candidate = normalize_current_teams(
+            get_candidate_teams((cached_result.get("final_result") or cached_result))
+        )
         current_candidate_source = "cached_matching_result" if current_candidate else ""
     if not current_candidate:
         current_candidate = algorithm_teams
