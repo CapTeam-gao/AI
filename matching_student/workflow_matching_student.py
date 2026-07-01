@@ -73,6 +73,11 @@ class MatchingState(TypedDict):
     final_result:Dict[str,Any] #최종 결과 저장
     llm_result:Dict[str,Any] #llm이 생성한 매칭상태 저장
     iteration_count: int #팀 생성 수정한 횟수 저장하여 무한반복을 막음
+    best_candidate: Dict[str, Any] #일반 팀 생성에서 현재까지 검증 점수가 가장 좋은 후보
+    best_balance_result: Dict[str, Any] #최고 후보의 코드 검증 결과
+    best_team_evaluations: List[Dict[str, Any]] #최고 후보의 팀별 검증 결과
+    best_candidate_score: List[float] #후보 비교용 점수. 앞 값부터 낮을수록 좋음
+    last_adjustment_improved: bool #직전 LLM 수정안이 이전 최고 후보보다 개선됐는지 여부
 #team으로 알고리즘으로 team상태 저장하고
 #llm_result로 llm이 제안한 팀 상태 저장하고
 #검증할때 실패하면 다시 알고리즘 보고 할수있도록 알고리즘은 그대로 두고 llm_result만 계속 덮어 씌어지면서 수정
@@ -1499,6 +1504,107 @@ def evaluate_balance_node(state: MatchingState) -> Dict[str, Any]:
         "team_evaluations": team_evaluations,
     }
 
+
+# 일반 팀 생성 후보를 구조 오류, 전체 오류, 점수 격차, 선호 미반영, 경고 순서로 비교한다.
+# 반환 tuple은 앞 항목부터 낮을수록 더 좋은 후보다.
+def build_candidate_quality_score(
+    balance_result: Dict[str, Any],
+    expected_team_count: int,
+) -> tuple:
+    algorithm_result = balance_result.get("algorithm_result") or balance_result
+    member_counts = algorithm_result.get("member_counts", [])
+    team_count = int(algorithm_result.get("team_count", 0) or 0)
+    structural_error = bool(
+        algorithm_result.get("missing_names")
+        or algorithm_result.get("duplicate_names")
+        or algorithm_result.get("unknown_names")
+        or (expected_team_count and team_count != expected_team_count)
+        or any(count < 3 or count > 5 for count in member_counts)
+        or (member_counts and max(member_counts) - min(member_counts) > 1)
+    )
+    score_gap = float(algorithm_result.get("score_gap", 0) or 0)
+    hard_score_gap = float(algorithm_result.get("hard_score_gap", 0) or 0)
+    score_gap_excess = max(0.0, score_gap - hard_score_gap)
+
+    return (
+        int(structural_error),
+        len(algorithm_result.get("errors", [])),
+        round(score_gap_excess, 2),
+        len(algorithm_result.get("unmet_preference_pairs", [])),
+        len(algorithm_result.get("warnings", [])),
+    )
+
+
+# 알고리즘 팀 list와 LLM 결과 dict를 동일한 추적 형태로 맞춘다.
+def normalize_tracked_candidate(candidate: Any, source: str) -> Dict[str, Any]:
+    if isinstance(candidate, dict):
+        normalized = copy.deepcopy(candidate)
+    else:
+        normalized = {
+            "final_teams": copy.deepcopy(get_candidate_teams(candidate)),
+            "changed": False,
+            "change_summary": "규칙 기반 알고리즘 초안입니다.",
+            "validation_notes": "일반 팀 생성 후보 비교에서 알고리즘 초안이 선택되었습니다.",
+        }
+    normalized["candidate_source"] = source
+    return normalized
+
+
+# 일반 팀 생성에서만 알고리즘 초안과 모든 LLM 후보를 비교하고 최고 후보를 보존한다.
+# 재생성 워크플로우는 이 노드를 호출하지 않는다.
+def evaluate_normal_workflow_node(state: MatchingState) -> Dict[str, Any]:
+    evaluation_update = evaluate_balance_node(state)
+    balance_result = evaluation_update["balance_result"]
+    team_evaluations = evaluation_update["team_evaluations"]
+    expected_team_count = len(state.get("teams", []))
+    current_candidate = normalize_tracked_candidate(
+        state.get("llm_result") or state.get("teams", []),
+        "llm_candidate" if state.get("llm_result") else "algorithm",
+    )
+    current_score = build_candidate_quality_score(balance_result, expected_team_count)
+
+    best_candidate = state.get("best_candidate")
+    best_balance_result = state.get("best_balance_result")
+    best_team_evaluations = state.get("best_team_evaluations")
+    best_score = tuple(state.get("best_candidate_score") or [])
+
+    if not best_candidate:
+        algorithm_balance, algorithm_evaluations = validation_balance_team(
+            candidate_result=state.get("teams", []),
+            analyzed_students=state.get("analyzed_students", []),
+            base_teams=state.get("teams", []),
+        )
+        algorithm_score = build_candidate_quality_score(
+            algorithm_balance,
+            expected_team_count,
+        )
+        if algorithm_score < current_score:
+            best_candidate = normalize_tracked_candidate(state.get("teams", []), "algorithm")
+            best_balance_result = algorithm_balance
+            best_team_evaluations = algorithm_evaluations
+            best_score = algorithm_score
+        else:
+            best_candidate = current_candidate
+            best_balance_result = balance_result
+            best_team_evaluations = team_evaluations
+            best_score = current_score
+
+    improved = current_score < best_score
+    if improved:
+        best_candidate = current_candidate
+        best_balance_result = balance_result
+        best_team_evaluations = team_evaluations
+        best_score = current_score
+
+    return {
+        **evaluation_update,
+        "best_candidate": best_candidate,
+        "best_balance_result": best_balance_result,
+        "best_team_evaluations": best_team_evaluations,
+        "best_candidate_score": list(best_score),
+        "last_adjustment_improved": improved,
+    }
+
 #llm 검증로직
 #팀 하나에 대한 평가
 # LLM이 팀 하나의 정성 평가를 반환할 때 쓰는 schema다.
@@ -1633,6 +1739,19 @@ def should_adjust(state: MatchingState):
     return "adjust_team_node"
 
 
+# 일반 팀 생성은 직전 수정이 최고 후보를 갱신했을 때만 다음 LLM 수정을 허용한다.
+# 재생성 워크플로우는 기존 while 조건을 사용하므로 이 분기를 호출하지 않는다.
+def should_adjust_normal_workflow(state: MatchingState):
+    balance_result = state.get("balance_result", {})
+    if balance_result.get("is_balanced") and not balance_result.get("need_adjustment"):
+        return "finalize_node"
+    if state.get("iteration_count", 0) >= MAX_ITERATION:
+        return "finalize_node"
+    if state.get("iteration_count", 0) > 0 and not state.get("last_adjustment_improved", False):
+        return "finalize_node"
+    return "adjust_team_node"
+
+
 
 
 
@@ -1665,7 +1784,11 @@ def get_adjust_team_prompt_chain():
     - 팀 총점 차이를 크게 악화시키지 않는다.
     - 하 또는 낮음 학생은 가능하면 중 이상의 학생과 함께 둔다.
     - 같은 role_group만으로 구성된 팀은 가능하면 피하되, game 역할군은 프로젝트 특성상 가능한 같은 팀에 유지한다.
-    - preferred_members는 강하게 고려하되, 점수/역할군/성향 균형을 깨면 선호를 분리할 수 있다.
+    - 팀 인원, 점수, 역할군, 성향 균형과 algorithm_result.errors 해결을 preferred_members보다 우선한다.
+    - 서로를 선택한 상호 선호 페어는 균형이 비슷한 대안 중에서 우선 유지한다.
+    - 역할군 이동이나 학생 교환 시 상호 선호 페어를 함께 이동해도 균형이 악화되지 않는지 먼저 검토한다.
+    - 선호를 유지하면 필수 오류가 남거나 팀 균형이 뚜렷하게 나빠지는 경우에는 분리할 수 있으며, 이유를 validation_notes에 쓴다.
+    - 단방향 preferred_members도 팀 균형을 해치지 않는 범위에서 고려한다.
     - 팀 안에 wants_leader=true인 학생이 있으면 그 학생들 중 leader_score와 technical_score가 높은 학생을 팀장으로 추천한다.
     - adjustment_history와 같은 수정 패턴을 반복하지 않는다.
 
@@ -1680,6 +1803,8 @@ def get_adjust_team_prompt_chain():
     - 성격성향/개발성향 점수는 팀 보완 관계를 판단할 때 사용하되, reason에는 숫자 점수를 직접 쓰지 않는다.
 
     계산 규칙:
+    - 역할군 응집 오류를 고칠 때 해당 역할군의 전체 학생 수, 현재 팀별 인원, 이동할 학생 수를 먼저 계산한다.
+    - 특정 역할군 전체를 한 팀에 모을 수 있으면 팀 균형과 선호 관계를 함께 비교해 오류가 남지 않는 배치를 선택한다.
     - 점수는 student_analysis 또는 algorithm_teams에 있는 score 값만 사용한다.
     - 새로운 점수나 skill_level을 만들지 않는다.
     - total_score는 최종 팀원의 score 합으로 작성한다.
@@ -1703,6 +1828,7 @@ def get_adjust_team_prompt_chain():
     user_prompt = """
     아래 검증 실패 정보를 바탕으로 팀 후보를 수정해라.
     algorithm_result.errors의 중복 배정, 누락 학생, 없는 이름, 팀 수 오류를 최우선으로 해결해라.
+    역할군 응집 오류는 전체 대상 인원과 팀 정원을 계산해 해결하되, 균형이 비슷한 대안이라면 상호 선호 페어를 유지해라.
     balance_result.llm_result.adjustment_request는 사용자 재생성 요청이다. 중복/누락/없는 이름/팀 수/인원 차이 규칙을 깨지 않는 범위에서 적극적으로 반영해라.
     사용자 요청을 완전히 반영할 수 없으면 가능한 대안을 적용하고 validation_notes에 반영하지 못한 이유를 써라.
     이 단계에서는 팀원 배정, 역할 분포, 팀장만 결정하고 배정 이유는 작성하지 마라.
@@ -2705,6 +2831,40 @@ def finalize_node(state: MatchingState) -> Dict[str, Any]:
         "final_result": final_result
     }
 
+
+# 일반 팀 생성에서 마지막 후보가 아니라 전체 후보 중 검증 점수가 가장 좋은 결과를 확정한다.
+# 기존 finalize_node를 그대로 재사용하되 재생성 경로의 동작은 변경하지 않는다.
+def finalize_normal_workflow_node(state: MatchingState) -> Dict[str, Any]:
+    best_candidate = state.get("best_candidate") or normalize_tracked_candidate(
+        state.get("llm_result") or state.get("teams", []),
+        "llm_candidate" if state.get("llm_result") else "algorithm",
+    )
+    best_balance_result = state.get("best_balance_result") or state.get("balance_result", {})
+    best_team_evaluations = state.get("best_team_evaluations") or state.get("team_evaluations", [])
+    iteration_count = state.get("iteration_count", 0)
+
+    if best_balance_result.get("is_balanced") and not best_balance_result.get("need_adjustment"):
+        finalized_by = "validation_passed"
+    elif iteration_count > 0 and not state.get("last_adjustment_improved", False):
+        finalized_by = "no_improvement"
+    elif iteration_count >= MAX_ITERATION:
+        finalized_by = "max_iteration"
+    else:
+        finalized_by = "manual_finalize"
+
+    # iteration_count를 0으로 전달해 기존 max-iteration fallback이 최고 후보를 덮어쓰지 않게 한다.
+    finalize_state = {
+        **state,
+        "llm_result": best_candidate,
+        "balance_result": best_balance_result,
+        "team_evaluations": best_team_evaluations,
+        "iteration_count": 0,
+    }
+    result = finalize_node(finalize_state)
+    result["final_result"]["iteration_count"] = iteration_count
+    result["final_result"]["finalized_by"] = finalized_by
+    return result
+
 #langgrph로 workflow형식으로 구축
 from langgraph.graph import StateGraph, START, END
 
@@ -2722,9 +2882,9 @@ workflow = StateGraph(MatchingState)
 #노드 추가.
 workflow.add_node('create_team_node',create_team_node) #알고리즘으로 팀 생성
 workflow.add_node('llm_analyzed',llm_analyzed) #llm으로 생성
-workflow.add_node('evaluate_balance_node',evaluate_balance_node) #팀 검증 노드
+workflow.add_node('evaluate_balance_node',evaluate_normal_workflow_node) #일반 팀 생성 전용 최고 후보 추적 검증 노드
 workflow.add_node('adjust_team_node',adjust_team_node) #팀 수정 노드
-workflow.add_node("finalize_node", finalize_node) #최종결과 노드
+workflow.add_node("finalize_node", finalize_normal_workflow_node) #일반 팀 생성 전용 최고 후보 확정 노드
 
 workflow.add_edge(START,'create_team_node')
 workflow.add_edge('create_team_node','llm_analyzed')
@@ -2732,7 +2892,7 @@ workflow.add_edge('llm_analyzed','evaluate_balance_node')
 
 workflow.add_conditional_edges(
     'evaluate_balance_node',
-    should_adjust,#조건 분기 함수 하나라도 수정필요면 adjust_team_node로 보내서 수정시킴.
+    should_adjust_normal_workflow,#개선될 때만 adjust_team_node로 보내서 추가 수정시킴.
     {
         'finalize_node' : 'finalize_node',
         'adjust_team_node' : 'adjust_team_node',
