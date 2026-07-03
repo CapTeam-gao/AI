@@ -6,6 +6,7 @@ from matching_student.workflow_matching_student import (
     build_candidate_quality_score,
     evaluate_normal_workflow_node,
     finalize_normal_workflow_node,
+    get_adjust_team_prompt_chain,
     run_regenerate_workflow,
     should_adjust_normal_workflow,
 )
@@ -33,6 +34,14 @@ def balance_result(*, errors=None, warnings=None, score_gap=0, hard_score_gap=30
 
 
 class NormalWorkflowIterationTest(unittest.TestCase):
+    def test_adjust_prompt_forces_fittable_game_students_into_one_team(self):
+        prompt = get_adjust_team_prompt_chain()
+        prompt_text = "\n".join(message.prompt.template for message in prompt.messages)
+
+        self.assertIn("game 역할군 전체 인원이 한 팀 정원 이하이면 반드시 전원을 같은 팀에 배치한다", prompt_text)
+        self.assertIn("game 학생 5명이고 팀 정원이 5명이면 반드시 5명을 한 팀에 배치", prompt_text)
+        self.assertIn("나뉘었다면 출력하지 말고 다시 배치해라", prompt_text)
+
     def test_candidate_score_prioritizes_structure_then_errors_and_preferences(self):
         valid = balance_result(errors=["game 분산"], unmet=[{"student": "A"}])
         structural = balance_result(errors=["누락"])

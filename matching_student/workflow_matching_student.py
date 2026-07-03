@@ -78,6 +78,8 @@ class MatchingState(TypedDict):
     best_team_evaluations: List[Dict[str, Any]] #최고 후보의 팀별 검증 결과
     best_candidate_score: List[float] #후보 비교용 점수. 앞 값부터 낮을수록 좋음
     last_adjustment_improved: bool #직전 LLM 수정안이 이전 최고 후보보다 개선됐는지 여부
+    regeneration_mode: bool #사용자 프롬프트 기반 재생성 경로인지 여부
+    regeneration_base_teams: List[Dict[str, Any]] #재생성 전 팀을 보존해 불필요한 전체 재배치를 막는 기준
 #team으로 알고리즘으로 team상태 저장하고
 #llm_result로 llm이 제안한 팀 상태 저장하고
 #검증할때 실패하면 다시 알고리즘 보고 할수있도록 알고리즘은 그대로 두고 llm_result만 계속 덮어 씌어지면서 수정
@@ -1769,6 +1771,26 @@ def should_adjust_normal_workflow(state: MatchingState):
 # TeamMatchingResult, FinalTeam, get_llm()은 위에서 정의한 것을 재사용한다.
 # 검증 실패한 팀 후보를 LLM이 다시 조정하도록 하는 프롬프트 chain을 만든다.
 # 현재 후보, 알고리즘 초안, 검증 결과, 조정 이력을 입력 변수로 사용한다.
+def build_adjustment_scope_rules(regeneration_mode: bool) -> str:
+    if not regeneration_mode:
+        return "일반 검증 수정이므로 current_candidate에서 오류가 있는 부분만 최소 수정한다."
+
+    return """
+    이 작업은 사용자 프롬프트 기반 재생성이다.
+    - 우선순위는 1) 중복/누락/없는 이름/팀 수/인원 차이 필수 규칙, 2) 사용자 요청 반영, 3) 역할·점수·성향 균형, 4) 최소 변경 순서다.
+    - 필수 규칙을 깨지 않는다면 사용자 요청을 반드시 반영한다. 균형이나 변경 범위를 이유로 실행 가능한 사용자 요청을 무시하거나 changed=false로 반환하지 않는다.
+    - 역할·점수 균형과 최소 변경은 사용자 요청을 반영한 후보들 사이에서 더 나은 안을 고르는 기준이다. 사용자 요청보다 앞서는 거절 기준으로 사용하지 않는다.
+    - regeneration_base_teams가 사용자가 보고 있던 변경 전 팀이며, 이를 변경 범위와 균형 비교의 기준으로 사용한다.
+    - 사용자 요청과 직접 관련된 팀, 그리고 인원 교환에 반드시 필요한 상대 팀만 수정한다.
+    - 요청과 무관한 팀은 팀원, 팀장, 팀 이름을 regeneration_base_teams와 동일하게 유지한다.
+    - 학생 이동이 필요하면 한 명을 빼고 다른 학생을 채우는 최소 교환을 우선한다. 남은 학생을 여러 팀에 연쇄적으로 재배치하지 않는다.
+    - 변경되는 각 팀의 역할군 종류 수와 하위 등급 지원 관계를 변경 전과 비교한다. 사용자 요청 자체가 역할 구성을 바꾸라는 내용이 아닌 한 역할 다양성을 낮추지 않는다.
+    - 변경 후 전체 팀 점수 격차를 변경 전보다 키우지 않는 교환안을 우선한다. 특정 팀만 강해지고 다른 팀만 약해지는 교환은 피한다.
+    - 요청을 반영하는 방법이 여러 개라면 이동 인원이 가장 적고 역할 또는 점수 균형 손상이 가장 작은 안을 선택한다.
+    - 출력 직전에 사용자 요청 반영 여부를 먼저 검사한다. 그다음 요청과 무관한 팀이 바뀌었는지, 변경 팀의 역할 다양성과 전체 점수 격차가 불필요하게 악화됐는지 검사하고 요청을 유지한 채 다시 수정한다.
+    """.strip()
+
+
 def get_adjust_team_prompt_chain():
     system_prompt = """
     당신은 캡스톤 프로젝트 팀 매칭 결과를 수정하는 담당자다.
@@ -1783,7 +1805,8 @@ def get_adjust_team_prompt_chain():
     - 팀별 인원 차이는 1명 이하로 유지한다.
     - 팀 총점 차이를 크게 악화시키지 않는다.
     - 하 또는 낮음 학생은 가능하면 중 이상의 학생과 함께 둔다.
-    - 같은 role_group만으로 구성된 팀은 가능하면 피하되, game 역할군은 프로젝트 특성상 가능한 같은 팀에 유지한다.
+    - 같은 role_group만으로 구성된 팀은 가능하면 피하되, game 역할군은 이 규칙의 예외다.
+    - game 역할군 전체 인원이 한 팀 정원 이하이면 반드시 전원을 같은 팀에 배치한다. 이 조건은 점수, 역할 다양성, 성향, 선호보다 우선한다.
     - 팀 인원, 점수, 역할군, 성향 균형과 algorithm_result.errors 해결을 preferred_members보다 우선한다.
     - 서로를 선택한 상호 선호 페어는 균형이 비슷한 대안 중에서 우선 유지한다.
     - 역할군 이동이나 학생 교환 시 상호 선호 페어를 함께 이동해도 균형이 악화되지 않는지 먼저 검토한다.
@@ -1791,6 +1814,9 @@ def get_adjust_team_prompt_chain():
     - 단방향 preferred_members도 팀 균형을 해치지 않는 범위에서 고려한다.
     - 팀 안에 wants_leader=true인 학생이 있으면 그 학생들 중 leader_score와 technical_score가 높은 학생을 팀장으로 추천한다.
     - adjustment_history와 같은 수정 패턴을 반복하지 않는다.
+
+    작업별 변경 범위 제한:
+    {adjustment_scope_rules}
 
     반영해야 할 정보:
     - balance_result.algorithm_result.errors는 반드시 해결한다.
@@ -1804,7 +1830,8 @@ def get_adjust_team_prompt_chain():
 
     계산 규칙:
     - 역할군 응집 오류를 고칠 때 해당 역할군의 전체 학생 수, 현재 팀별 인원, 이동할 학생 수를 먼저 계산한다.
-    - 특정 역할군 전체를 한 팀에 모을 수 있으면 팀 균형과 선호 관계를 함께 비교해 오류가 남지 않는 배치를 선택한다.
+    - game 학생 수가 한 팀 정원 이하이면 전원 한 팀 배치가 가능하다. 예: game 학생 5명이고 팀 정원이 5명이면 반드시 5명을 한 팀에 배치하며 불가능하다고 판단하지 않는다.
+    - game 학생 수가 한 팀 정원을 초과할 때만 여러 팀으로 나눌 수 있고, 이 경우 사용하는 팀 수를 최소화한다.
     - 점수는 student_analysis 또는 algorithm_teams에 있는 score 값만 사용한다.
     - 새로운 점수나 skill_level을 만들지 않는다.
     - total_score는 최종 팀원의 score 합으로 작성한다.
@@ -1828,7 +1855,8 @@ def get_adjust_team_prompt_chain():
     user_prompt = """
     아래 검증 실패 정보를 바탕으로 팀 후보를 수정해라.
     algorithm_result.errors의 중복 배정, 누락 학생, 없는 이름, 팀 수 오류를 최우선으로 해결해라.
-    역할군 응집 오류는 전체 대상 인원과 팀 정원을 계산해 해결하되, 균형이 비슷한 대안이라면 상호 선호 페어를 유지해라.
+    역할군 응집 오류는 전체 대상 인원과 팀 정원을 계산해 반드시 해결해라.
+    최종 출력 전에 game 학생이 함께 배치 가능한데 여러 팀에 나뉘었는지 검사하고, 나뉘었다면 출력하지 말고 다시 배치해라.
     balance_result.llm_result.adjustment_request는 사용자 재생성 요청이다. 중복/누락/없는 이름/팀 수/인원 차이 규칙을 깨지 않는 범위에서 적극적으로 반영해라.
     사용자 요청을 완전히 반영할 수 없으면 가능한 대안을 적용하고 validation_notes에 반영하지 못한 이유를 써라.
     이 단계에서는 팀원 배정, 역할 분포, 팀장만 결정하고 배정 이유는 작성하지 마라.
@@ -1841,6 +1869,9 @@ def get_adjust_team_prompt_chain():
 
     algorithm_teams:
     {algorithm_teams}
+
+    regeneration_base_teams:
+    {regeneration_base_teams}
 
     current_candidate:
     {current_candidate}
@@ -1875,6 +1906,8 @@ def adjust_team_node(state: MatchingState) -> Dict[str, Any]:
     iteration_count = state.get("iteration_count", 0) #무한 반복이 되지 않도록 초기값 0으로하고 state에서 가져옴.
     allowed_student_names = get_student_names(analyzed_students) #학생 이름 중복되지 않도록 검증.
     reason_context = build_reason_context(current_candidate, analyzed_students)
+    regeneration_mode = state.get("regeneration_mode", False)
+    regeneration_base_teams = state.get("regeneration_base_teams") or current_candidate
 
     llm = get_llm()
     structured_llm = llm.with_structured_output(TeamMatchingResult)
@@ -1884,6 +1917,8 @@ def adjust_team_node(state: MatchingState) -> Dict[str, Any]:
         "allowed_student_names": json.dumps(allowed_student_names, ensure_ascii=False),
         "student_analysis": json.dumps(analyzed_students, ensure_ascii=False, indent=0),
         "algorithm_teams": json.dumps(algorithm_teams, ensure_ascii=False, indent=0),
+        "regeneration_base_teams": json.dumps(regeneration_base_teams, ensure_ascii=False, indent=0),
+        "adjustment_scope_rules": build_adjustment_scope_rules(regeneration_mode),
         "current_candidate": json.dumps(current_candidate, ensure_ascii=False, indent=0),
         "reason_context": json.dumps(reason_context, ensure_ascii=False, indent=0),
         "balance_result": json.dumps(balance_result, ensure_ascii=False, indent=0),
@@ -3069,6 +3104,8 @@ def build_regenerate_state(
             ),
         },
         "iteration_count": 0,
+        "regeneration_mode": True,
+        "regeneration_base_teams": copy.deepcopy(current_candidate),
     }
 
 
