@@ -522,7 +522,7 @@ def get_analyze_stu(
         normalized_response["analysis_status"] = "SUCCESS"
         print(normalized_response)
         results_by_index[index] = normalized_response
-        #리스트만들어서 답변나오면 그리스트 안에 들어가는 형식으로 이 만든걸 matching하는 llm에게 넘김.
+        #리스트만들어서 답변나오면 그 리스트 안에 들어가는 형식으로 이 만든걸 matching하는 llm에게 넘김.
         # 분석 결과 저장
 
     results = ensure_preference_profiles([results_by_index[index] for index in range(len(datas))])
