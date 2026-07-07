@@ -1,0 +1,700 @@
+"""Hackathon-oriented student team matching engine.
+
+This module is deliberately independent from the capstone matcher.  It builds a
+deterministic, skill-balanced draft first and only accepts LLM rearrangements
+that preserve that development-skill balance.
+"""
+
+from __future__ import annotations
+
+import copy
+import json
+import math
+import os
+import re
+from statistics import mean
+from typing import Any, Dict, List, Optional, TypedDict
+
+from dotenv import load_dotenv
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_openai import ChatOpenAI
+from langgraph.graph import END, START, StateGraph
+from pydantic import BaseModel, Field
+
+
+load_dotenv(override=False)
+
+TEAM_SIZE = 5
+HIGH_SCORE = 4
+LOW_SCORE = 2
+MAX_ITERATIONS = 3
+EPSILON = 1e-9
+
+SKILL_LEVEL_SCORE = {
+    "상": 5,
+    "중상": 4,
+    "중": 3,
+    "중하": 2,
+    "하": 1,
+    "높음": 5,
+    "보통": 3,
+    "낮음": 1,
+    "HIGH": 5,
+    "UPPER_MIDDLE": 4,
+    "MIDDLE": 3,
+    "LOWER_MIDDLE": 2,
+    "LOW": 1,
+}
+
+PERSONALITY_KEYS = (
+    "ideaPlanning",
+    "communication",
+    "roleFlexibility",
+    "timePressure",
+    "staminaFocus",
+)
+DEVELOPMENT_KEYS = (
+    "implementation",
+    "problemSolving",
+    "completionQuality",
+    "presentation",
+    "leadership",
+)
+ALL_TRAIT_KEYS = PERSONALITY_KEYS + DEVELOPMENT_KEYS
+TRAIT_LABELS = {
+    "ideaPlanning": "아이디어/기획",
+    "communication": "협업/소통",
+    "roleFlexibility": "역할 유연성",
+    "timePressure": "시간 압박 대응",
+    "staminaFocus": "체력/집중 유지",
+    "implementation": "개발 실행력",
+    "problemSolving": "문제 해결력",
+    "completionQuality": "완성도 추구",
+    "presentation": "발표/설명",
+    "leadership": "리더십/정리",
+}
+
+
+class MatchingState(TypedDict, total=False):
+    analyzed_students: List[Dict[str, Any]]
+    team_size: int
+    teams: List[Dict[str, Any]]
+    candidate_teams: List[Dict[str, Any]]
+    best_teams: List[Dict[str, Any]]
+    baseline_metrics: Dict[str, Any]
+    balance_result: Dict[str, Any]
+    best_balance_result: Dict[str, Any]
+    best_score: List[float]
+    iteration_count: int
+    adjustment_history: List[Dict[str, Any]]
+    llm_available: bool
+    final_result: Dict[str, Any]
+
+
+class LLMTeam(BaseModel):
+    team_name: str = Field(description="기존 팀 이름")
+    members: List[str] = Field(description="이 팀에 배정할 학생 이름")
+
+
+class LLMMatchingResult(BaseModel):
+    teams: List[LLMTeam]
+    change_summary: str = ""
+
+
+def _first_dict(student: Dict[str, Any], *keys: str) -> Dict[str, Any]:
+    for key in keys:
+        value = student.get(key)
+        if isinstance(value, dict):
+            return value
+    return {}
+
+
+def _raw_trait(student: Dict[str, Any], key: str) -> Any:
+    personality = _first_dict(student, "personality_scores", "personalityScores")
+    development = _first_dict(student, "development_scores", "developmentScores")
+    if key in personality:
+        return personality[key]
+    if key in development:
+        return development[key]
+    return student.get(key)
+
+
+def validate_and_normalize_students(students: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Validate all ten hackathon scores and return a normalized copy.
+
+    Missing or out-of-range values are rejected instead of silently becoming a
+    neutral score, because that would make the team result look valid when the
+    new survey payload was not connected correctly.
+    """
+    if not isinstance(students, list) or not students:
+        raise ValueError("해커톤 팀 생성에는 최소 1명의 학생 데이터가 필요합니다.")
+
+    errors: List[str] = []
+    normalized: List[Dict[str, Any]] = []
+    seen_names = set()
+    for index, original in enumerate(students):
+        if not isinstance(original, dict):
+            errors.append(f"{index + 1}번째 학생 데이터가 객체가 아닙니다.")
+            continue
+        student = copy.deepcopy(original)
+        name = str(student.get("name") or "").strip()
+        label = name or f"{index + 1}번째 학생"
+        if not name:
+            errors.append(f"{label}: name이 없습니다.")
+        elif name in seen_names:
+            errors.append(f"{label}: 같은 이름이 중복되었습니다.")
+        seen_names.add(name)
+
+        personality: Dict[str, int] = {}
+        development: Dict[str, int] = {}
+        for key in ALL_TRAIT_KEYS:
+            value = _raw_trait(student, key)
+            if isinstance(value, bool):
+                errors.append(f"{label}: {key}는 1~5 숫자여야 합니다.")
+                continue
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                errors.append(f"{label}: {key} 점수가 누락되었습니다.")
+                continue
+            if not numeric.is_integer() or not 1 <= numeric <= 5:
+                errors.append(f"{label}: {key}={value!r}, 허용 범위는 정수 1~5입니다.")
+                continue
+            target = personality if key in PERSONALITY_KEYS else development
+            target[key] = int(numeric)
+
+        student["name"] = name
+        student["personality_scores"] = personality
+        student["development_scores"] = development
+        normalized.append(student)
+
+    if errors:
+        raise ValueError("해커톤 성향 점수 검증 실패:\n- " + "\n- ".join(errors))
+    return normalized
+
+
+def parse_stack_score(stack_score: Any) -> float:
+    if isinstance(stack_score, dict):
+        values = [float(value) for value in stack_score.values() if isinstance(value, (int, float))]
+    elif isinstance(stack_score, list):
+        values = [float(value) for value in stack_score if isinstance(value, (int, float))]
+    else:
+        values = [float(value) for value in re.findall(r"(\d+(?:\.\d+)?)\s*점", str(stack_score or ""))]
+    return mean(values) if values else 0.0
+
+
+def get_technical_score(student: Dict[str, Any]) -> float:
+    raw_level = student.get("skill_level") or student.get("student_level") or student.get("level")
+    level_key = str(raw_level or "").strip()
+    level_score = SKILL_LEVEL_SCORE.get(level_key, SKILL_LEVEL_SCORE.get(level_key.upper()))
+    if level_score is None:
+        level_score = 1
+    return round(level_score * 10 + parse_stack_score(student.get("stack_score")), 2)
+
+
+def get_role_group(role: Any) -> str:
+    text = str(role or "").lower()
+    groups = (
+        ("game", ("unity", "unreal", "game", "게임", "유니티", "언리얼")),
+        ("fullstack", ("fullstack", "full-stack", "풀스택")),
+        ("devops", ("devops", "인프라", "배포", "ci/cd")),
+        ("security", ("security", "보안", "owasp")),
+        ("frontend", ("frontend", "front", "프론트")),
+        ("backend", ("backend", "back", "server", "서버", "백엔드")),
+        ("ai_data", ("ai", "머신러닝", "ml", "데이터")),
+        ("app", ("android", "ios", "mobile", "모바일", "앱")),
+        ("design", ("design", "figma", "ui/ux", "디자인")),
+    )
+    for group, keywords in groups:
+        if any(keyword in text for keyword in keywords):
+            return group
+    return "etc"
+
+
+def make_student_summary(student: Dict[str, Any]) -> Dict[str, Any]:
+    personality = student["personality_scores"]
+    development = student["development_scores"]
+    technical_score = get_technical_score(student)
+    execution_score = round(mean((development["implementation"], development["problemSolving"])), 2)
+    role = student.get("role") or student.get("goal") or student.get("desired_role") or ""
+    return {
+        "user_id": student.get("user_id") or student.get("userId") or student.get("student_id"),
+        "name": student["name"],
+        "skill_level": student.get("skill_level") or student.get("student_level"),
+        "stack_score": student.get("stack_score", ""),
+        "technical_score": technical_score,
+        "execution_score": execution_score,
+        "role": role,
+        "role_group": get_role_group(role),
+        "personality_scores": personality,
+        "development_scores": development,
+        "preferred_members": student.get("preferred_members") or student.get("preferredMembers") or [],
+        "wants_leader": bool(student.get("wants_leader") or student.get("wantsLeader")),
+    }
+
+
+def build_team_capacities(total: int, team_size: int = TEAM_SIZE) -> List[int]:
+    if team_size <= 0:
+        raise ValueError("team_size는 1 이상이어야 합니다.")
+    count = max(1, math.ceil(total / team_size))
+    base, remainder = divmod(total, count)
+    return [base + (1 if index < remainder else 0) for index in range(count)]
+
+
+def _trait(member: Dict[str, Any], key: str) -> int:
+    group = "personality_scores" if key in PERSONALITY_KEYS else "development_scores"
+    return int(member[group][key])
+
+
+def _average(members: List[Dict[str, Any]], field: str) -> float:
+    return round(mean(float(member[field]) for member in members), 3) if members else 0.0
+
+
+def _trait_average(members: List[Dict[str, Any]], key: str) -> float:
+    return round(mean(_trait(member, key) for member in members), 3) if members else 0.0
+
+
+def _role_counts(members: List[Dict[str, Any]]) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for member in members:
+        role = member["role_group"]
+        counts[role] = counts.get(role, 0) + 1
+    return counts
+
+
+def _preferred_names(member: Dict[str, Any]) -> set[str]:
+    raw = member.get("preferred_members", [])
+    if isinstance(raw, str):
+        raw = re.split(r"[,\n/]", raw)
+    return {str(value).strip() for value in raw if str(value).strip()}
+
+
+def _team_averages(teams: List[Dict[str, Any]], field: str) -> List[float]:
+    return [_average(team["members"], field) for team in teams if team.get("members")]
+
+
+def _spread(values: List[float]) -> float:
+    return round(max(values) - min(values), 3) if values else 0.0
+
+
+def _hackathon_penalty(teams: List[Dict[str, Any]], expected_names: Optional[set[str]] = None) -> float:
+    penalty = 0.0
+    for team in teams:
+        members = team.get("members", [])
+        roles = _role_counts(members)
+        penalty += sum(max(0, count - 1) ** 2 for role, count in roles.items() if role != "etc") * 2
+        penalty += max(0, sum(_trait(member, "timePressure") <= LOW_SCORE for member in members) - 1) * 3
+        penalty += max(0, sum(_trait(member, "staminaFocus") <= LOW_SCORE for member in members) - 1) * 3
+        penalty += 5 if members and not any(_trait(member, "presentation") >= HIGH_SCORE for member in members) else 0
+        penalty += 5 if members and not any(_trait(member, "leadership") >= HIGH_SCORE for member in members) else 0
+        member_names = {member["name"] for member in members}
+        penalty -= sum(len(_preferred_names(member) & member_names) for member in members) * 0.1
+    return round(penalty, 3)
+
+
+def _candidate_score(teams: List[Dict[str, Any]], expected_names: set[str]) -> List[float]:
+    names = [member["name"] for team in teams for member in team.get("members", [])]
+    structural = len(names) - len(set(names)) + len(expected_names - set(names)) + len(set(names) - expected_names)
+    return [
+        float(structural),
+        _spread(_team_averages(teams, "technical_score")),
+        _spread(_team_averages(teams, "execution_score")),
+        _hackathon_penalty(teams, expected_names),
+    ]
+
+
+def _placement_key(teams: List[Dict[str, Any]], team_index: int, student: Dict[str, Any], target_technical: float, target_execution: float) -> tuple:
+    team = teams[team_index]
+    projected = team["members"] + [student]
+    role_count = _role_counts(team["members"]).get(student["role_group"], 0)
+    low_pressure = sum(_trait(member, "timePressure") <= LOW_SCORE for member in projected)
+    low_stamina = sum(_trait(member, "staminaFocus") <= LOW_SCORE for member in projected)
+    has_presentation = any(_trait(member, "presentation") >= HIGH_SCORE for member in team["members"])
+    has_leader = any(_trait(member, "leadership") >= HIGH_SCORE for member in team["members"])
+    preference_hits = len(_preferred_names(student) & {member["name"] for member in team["members"]})
+    return (
+        abs(_average(projected, "technical_score") - target_technical),
+        abs(_average(projected, "execution_score") - target_execution),
+        role_count,
+        max(0, low_pressure - 1) + max(0, low_stamina - 1),
+        0 if _trait(student, "presentation") >= HIGH_SCORE and not has_presentation else 1,
+        0 if _trait(student, "leadership") >= HIGH_SCORE and not has_leader else 1,
+        -preference_hits,
+        len(team["members"]),
+        team_index,
+    )
+
+
+def _optimize_swaps(teams: List[Dict[str, Any]], expected_names: set[str], max_passes: int = 12) -> List[Dict[str, Any]]:
+    optimized = copy.deepcopy(teams)
+    current = _candidate_score(optimized, expected_names)
+    for _ in range(max_passes):
+        best_score = current
+        best_swap = None
+        for left in range(len(optimized)):
+            for right in range(left + 1, len(optimized)):
+                for left_member in range(len(optimized[left]["members"])):
+                    for right_member in range(len(optimized[right]["members"])):
+                        candidate = copy.deepcopy(optimized)
+                        candidate[left]["members"][left_member], candidate[right]["members"][right_member] = (
+                            candidate[right]["members"][right_member], candidate[left]["members"][left_member]
+                        )
+                        score = _candidate_score(candidate, expected_names)
+                        if score < best_score:
+                            best_score = score
+                            best_swap = (left, right, left_member, right_member)
+        if best_swap is None:
+            break
+        left, right, left_member, right_member = best_swap
+        optimized[left]["members"][left_member], optimized[right]["members"][right_member] = (
+            optimized[right]["members"][right_member], optimized[left]["members"][left_member]
+        )
+        current = best_score
+    return optimized
+
+
+def create_initial_teams(students: List[Dict[str, Any]], team_size: int = TEAM_SIZE) -> List[Dict[str, Any]]:
+    summaries = [make_student_summary(student) for student in students]
+    capacities = build_team_capacities(len(summaries), team_size)
+    teams = [
+        {"team_name": f"팀 {index + 1}", "capacity": capacity, "members": []}
+        for index, capacity in enumerate(capacities)
+    ]
+    target_technical = mean(member["technical_score"] for member in summaries)
+    target_execution = mean(member["execution_score"] for member in summaries)
+
+    # Serpentine-like greedy placement: strongest developers are considered first,
+    # while the projected team averages remain the first two selection criteria.
+    ordered = sorted(
+        summaries,
+        key=lambda member: (
+            member["technical_score"],
+            member["execution_score"],
+            _trait(member, "presentation"),
+            _trait(member, "leadership"),
+            member["name"],
+        ),
+        reverse=True,
+    )
+    for student in ordered:
+        available = [index for index, team in enumerate(teams) if len(team["members"]) < team["capacity"]]
+        selected = min(
+            available,
+            key=lambda index: _placement_key(teams, index, student, target_technical, target_execution),
+        )
+        teams[selected]["members"].append(student)
+
+    return _optimize_swaps(teams, {student["name"] for student in summaries})
+
+
+def _team_warnings(team: Dict[str, Any]) -> List[str]:
+    members = team.get("members", [])
+    warnings = []
+    if members and not any(_trait(member, "presentation") >= HIGH_SCORE for member in members):
+        warnings.append("presentation 4점 이상 발표 후보가 없습니다.")
+    if members and not any(_trait(member, "leadership") >= HIGH_SCORE for member in members):
+        warnings.append("leadership 4점 이상 리더 후보가 없습니다.")
+    for key in ("timePressure", "staminaFocus"):
+        low_count = sum(_trait(member, key) <= LOW_SCORE for member in members)
+        if low_count >= 2:
+            warnings.append(f"{TRAIT_LABELS[key]} 2점 이하 학생이 {low_count}명입니다.")
+    return warnings
+
+
+def validate_teams(teams: List[Dict[str, Any]], students: List[Dict[str, Any]], baseline: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    expected = {student["name"] for student in students}
+    names = [member.get("name") for team in teams for member in team.get("members", [])]
+    duplicate_names = sorted({name for name in names if names.count(name) > 1})
+    missing_names = sorted(expected - set(names))
+    unknown_names = sorted(set(names) - expected)
+    technical_spread = _spread(_team_averages(teams, "technical_score"))
+    execution_spread = _spread(_team_averages(teams, "execution_score"))
+    capacities_valid = all(len(team.get("members", [])) == team.get("capacity") for team in teams)
+    structural_valid = not duplicate_names and not missing_names and not unknown_names and capacities_valid
+    technical_preserved = baseline is None or technical_spread <= baseline["technical_spread"] + EPSILON
+    execution_preserved = baseline is None or execution_spread <= baseline["execution_spread"] + EPSILON
+    evaluations = []
+    warnings = []
+    for team in teams:
+        team_warnings = _team_warnings(team)
+        warnings.extend(f"{team['team_name']}: {warning}" for warning in team_warnings)
+        evaluations.append({
+            "team_name": team["team_name"],
+            "technical_average": _average(team["members"], "technical_score"),
+            "execution_average": _average(team["members"], "execution_score"),
+            "role_groups": _role_counts(team["members"]),
+            "warnings": team_warnings,
+        })
+    if not technical_preserved:
+        warnings.append("LLM 수정안이 규칙 기반 초안보다 기술 점수 편차를 키웠습니다.")
+    if not execution_preserved:
+        warnings.append("LLM 수정안이 규칙 기반 초안보다 개발 실행 역량 편차를 키웠습니다.")
+    score = _candidate_score(teams, expected)
+    return {
+        "is_valid": structural_valid and technical_preserved and execution_preserved,
+        "needs_adjustment": bool(warnings) and structural_valid,
+        "structural_valid": structural_valid,
+        "technical_preserved": technical_preserved,
+        "execution_preserved": execution_preserved,
+        "technical_spread": technical_spread,
+        "execution_spread": execution_spread,
+        "duplicate_students": duplicate_names,
+        "missing_students": missing_names,
+        "unknown_students": unknown_names,
+        "capacities_valid": capacities_valid,
+        "warnings": warnings,
+        "team_evaluations": evaluations,
+        "score": score,
+    }
+
+
+def _llm() -> ChatOpenAI:
+    return ChatOpenAI(
+        model=os.getenv("OPENAI_HACKATHON_MATCHING_MODEL", os.getenv("OPENAI_MATCHING_MODEL", "gpt-5.4")),
+        timeout=int(os.getenv("OPENAI_TIMEOUT", "120")),
+        max_retries=int(os.getenv("OPENAI_MAX_RETRIES", "2")),
+    )
+
+
+def is_llm_enabled() -> bool:
+    """Return whether the optional LLM correction stage may make API calls."""
+    flag = os.getenv("HACKATHON_MATCHING_LLM_ENABLED", "true").strip().lower()
+    return flag not in {"0", "false", "no", "off"} and bool(os.getenv("OPENAI_API_KEY"))
+
+
+def _compact_teams(teams: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [
+        {
+            "team_name": team["team_name"],
+            "capacity": team["capacity"],
+            "members": [
+                {
+                    "name": member["name"],
+                    "role_group": member["role_group"],
+                    "technical_score": member["technical_score"],
+                    "execution_score": member["execution_score"],
+                    **member["personality_scores"],
+                    **member["development_scores"],
+                }
+                for member in team["members"]
+            ],
+        }
+        for team in teams
+    ]
+
+
+def _request_llm_adjustment(teams: List[Dict[str, Any]], warnings: List[str]) -> Dict[str, Any]:
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", """당신은 해커톤 팀 매칭 보정자다. 학생 이름, 팀 수, 팀별 정원은 절대 바꾸지 않는다.
+최우선 조건은 팀별 technical_score와 execution_score 균형이다. 이 균형을 악화시키면서 성향 조건을 맞추지 않는다.
+그 범위에서 역할 중복 최소화, implementation/problemSolving 고득점자 분산, presentation/leadership 4점 이상 분산,
+timePressure/staminaFocus 2점 이하 집중 방지, ideaPlanning 기획 활용, roleFlexibility 부족 역할 보완 순으로 교환한다.
+경고가 개선되지 않으면 원안을 그대로 반환한다."""),
+        ("human", "현재 팀:\n{teams}\n\n개선 대상 경고:\n{warnings}"),
+    ])
+    chain = prompt | _llm().with_structured_output(LLMMatchingResult)
+    response = chain.invoke({
+        "teams": json.dumps(_compact_teams(teams), ensure_ascii=False),
+        "warnings": json.dumps(warnings, ensure_ascii=False),
+    })
+    return response.model_dump() if hasattr(response, "model_dump") else dict(response)
+
+
+def _rebuild_llm_teams(raw: Dict[str, Any], base_teams: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    member_map = {member["name"]: member for team in base_teams for member in team["members"]}
+    capacity_map = {team["team_name"]: team["capacity"] for team in base_teams}
+    rebuilt = []
+    for raw_team in raw.get("teams", []):
+        team_name = raw_team.get("team_name")
+        rebuilt.append({
+            "team_name": team_name,
+            "capacity": capacity_map.get(team_name, -1),
+            "members": [member_map[name] for name in raw_team.get("members", []) if name in member_map],
+        })
+    return rebuilt
+
+
+def create_team_node(state: MatchingState) -> Dict[str, Any]:
+    teams = create_initial_teams(state["analyzed_students"], state.get("team_size", TEAM_SIZE))
+    baseline = validate_teams(teams, state["analyzed_students"])
+    metrics = {
+        "technical_spread": baseline["technical_spread"],
+        "execution_spread": baseline["execution_spread"],
+    }
+    return {
+        "teams": teams,
+        "candidate_teams": teams,
+        "best_teams": teams,
+        "baseline_metrics": metrics,
+        "best_balance_result": baseline,
+        "best_score": baseline["score"],
+        "balance_result": baseline,
+    }
+
+
+def llm_analyzed(state: MatchingState) -> Dict[str, Any]:
+    if not state.get("llm_available"):
+        return {"candidate_teams": state["teams"]}
+    try:
+        raw = _request_llm_adjustment(state["teams"], state["balance_result"].get("warnings", []))
+        return {"candidate_teams": _rebuild_llm_teams(raw, state["teams"])}
+    except Exception as error:
+        history = list(state.get("adjustment_history", []))
+        history.append({"iteration": 0, "accepted": False, "reason": f"LLM 보정 실패: {error}"})
+        return {"candidate_teams": state["teams"], "llm_available": False, "adjustment_history": history}
+
+
+def evaluate_balance_node(state: MatchingState) -> Dict[str, Any]:
+    candidate = state.get("candidate_teams") or state["teams"]
+    result = validate_teams(candidate, state["analyzed_students"], state["baseline_metrics"])
+    best_score = state.get("best_score", [math.inf] * 4)
+    accepted = result["is_valid"] and result["score"] < best_score
+    history = list(state.get("adjustment_history", []))
+    if candidate is not state.get("teams") or state.get("iteration_count", 0):
+        history.append({
+            "iteration": state.get("iteration_count", 0),
+            "accepted": accepted,
+            "score": result["score"],
+            "warnings": result["warnings"],
+        })
+    update: Dict[str, Any] = {"balance_result": result, "adjustment_history": history}
+    if accepted:
+        update.update({"best_teams": candidate, "best_balance_result": result, "best_score": result["score"]})
+    return update
+
+
+def adjust_team_node(state: MatchingState) -> Dict[str, Any]:
+    iteration = state.get("iteration_count", 0) + 1
+    if not state.get("llm_available"):
+        return {"iteration_count": iteration, "candidate_teams": state["best_teams"]}
+    try:
+        raw = _request_llm_adjustment(state["best_teams"], state["balance_result"].get("warnings", []))
+        candidate = _rebuild_llm_teams(raw, state["best_teams"])
+        return {"iteration_count": iteration, "candidate_teams": candidate}
+    except Exception as error:
+        history = list(state.get("adjustment_history", []))
+        history.append({"iteration": iteration, "accepted": False, "reason": f"LLM 재보정 실패: {error}"})
+        return {
+            "iteration_count": iteration,
+            "candidate_teams": state["best_teams"],
+            "llm_available": False,
+            "adjustment_history": history,
+        }
+
+
+def _choose_member(members: List[Dict[str, Any]], key: str, extra: str = "technical_score") -> Dict[str, Any]:
+    return max(members, key=lambda member: (_trait(member, key), member.get(extra, 0), member["name"]))
+
+
+def _enrich_team(team: Dict[str, Any]) -> Dict[str, Any]:
+    members = team["members"]
+    leader = max(
+        members,
+        key=lambda member: (
+            _trait(member, "leadership"),
+            _trait(member, "communication"),
+            member["execution_score"],
+            member["name"],
+        ),
+    )
+    presenter = _choose_member(members, "presentation")
+    planner = _choose_member(members, "ideaPlanning")
+    flexible = _choose_member(members, "roleFlexibility")
+    personality_averages = {key: _trait_average(members, key) for key in PERSONALITY_KEYS}
+    development_averages = {key: _trait_average(members, key) for key in DEVELOPMENT_KEYS}
+    reasons = [
+        f"기술 점수 평균 {_average(members, 'technical_score'):.2f}, 개발 실행 역량 평균 {_average(members, 'execution_score'):.2f}로 실력 균형을 맞췄습니다.",
+        f"{presenter['name']} 학생은 presentation {_trait(presenter, 'presentation')}점으로 발표 후보입니다.",
+        f"{planner['name']} 학생은 ideaPlanning {_trait(planner, 'ideaPlanning')}점으로 기획 후보입니다.",
+        f"{flexible['name']} 학생은 roleFlexibility {_trait(flexible, 'roleFlexibility')}점으로 부족 역할 보완 후보입니다.",
+    ]
+    return {
+        "team_name": team["team_name"],
+        "members": members,
+        "capacity": team["capacity"],
+        "leader": leader["name"],
+        "presentation_candidate": presenter["name"],
+        "planning_candidate": planner["name"],
+        "flexible_supporter": flexible["name"],
+        "role_groups": _role_counts(members),
+        "technical_average": _average(members, "technical_score"),
+        "execution_average": _average(members, "execution_score"),
+        "personality_averages": personality_averages,
+        "development_averages": development_averages,
+        "assignment_reasons": reasons,
+        "warnings": _team_warnings(team),
+    }
+
+
+def finalize_node(state: MatchingState) -> Dict[str, Any]:
+    best_teams = state["best_teams"]
+    final_teams = [_enrich_team(team) for team in best_teams]
+    balance = validate_teams(best_teams, state["analyzed_students"], state["baseline_metrics"])
+    if not state.get("llm_available"):
+        balance["warnings"] = balance["warnings"] + ["LLM 보정이 비활성화되어 규칙 기반 결과로 확정했습니다."]
+    return {
+        "final_result": {
+            "final_teams": final_teams,
+            "balance_result": balance,
+            "adjustment_history": state.get("adjustment_history", []),
+            "iteration_count": state.get("iteration_count", 0),
+            "finalized_by": "best_validated_candidate",
+        }
+    }
+
+
+def should_adjust(state: MatchingState) -> str:
+    if not state.get("llm_available"):
+        return "finalize"
+    if state.get("iteration_count", 0) >= MAX_ITERATIONS:
+        return "finalize"
+    result = state.get("balance_result", {})
+    if not result.get("needs_adjustment"):
+        return "finalize"
+    return "adjust"
+
+
+workflow = StateGraph(MatchingState)
+workflow.add_node("create_team_node", create_team_node)
+workflow.add_node("llm_analyzed", llm_analyzed)
+workflow.add_node("evaluate_balance_node", evaluate_balance_node)
+workflow.add_node("adjust_team_node", adjust_team_node)
+workflow.add_node("finalize_node", finalize_node)
+workflow.add_edge(START, "create_team_node")
+workflow.add_edge("create_team_node", "llm_analyzed")
+workflow.add_edge("llm_analyzed", "evaluate_balance_node")
+workflow.add_conditional_edges(
+    "evaluate_balance_node",
+    should_adjust,
+    {"adjust": "adjust_team_node", "finalize": "finalize_node"},
+)
+workflow.add_edge("adjust_team_node", "evaluate_balance_node")
+workflow.add_edge("finalize_node", END)
+app = workflow.compile()
+
+
+def run_workflow(analyzed_students: List[Dict[str, Any]], team_size: int = TEAM_SIZE) -> Dict[str, Any]:
+    """Create hackathon teams without writing to the capstone DB or output file."""
+    normalized = validate_and_normalize_students(analyzed_students)
+    initial_state: MatchingState = {
+        "analyzed_students": normalized,
+        "team_size": team_size,
+        "iteration_count": 0,
+        "adjustment_history": [],
+        "llm_available": is_llm_enabled(),
+    }
+    result = app.invoke(initial_state)
+    return {
+        "analyzed_students": normalized,
+        "final_result": result["final_result"],
+    }
+
+
+__all__ = [
+    "app",
+    "create_initial_teams",
+    "get_technical_score",
+    "run_workflow",
+    "validate_and_normalize_students",
+    "validate_teams",
+]
