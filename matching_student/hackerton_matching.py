@@ -101,6 +101,23 @@ class LLMMatchingResult(BaseModel):
     change_summary: str = ""
 
 
+class ReasonCard(BaseModel):
+    title: str
+    description: str
+
+
+class TeamServiceExplanation(BaseModel):
+    team_name: str
+    strengths: str
+    weaknesses: str
+    reason_cards: List[ReasonCard] = Field(min_length=2, max_length=4)
+    reason: str
+
+
+class ServiceExplanationResult(BaseModel):
+    teams: List[TeamServiceExplanation]
+
+
 def _first_dict(student: Dict[str, Any], *keys: str) -> Dict[str, Any]:
     for key in keys:
         value = student.get(key)
@@ -608,7 +625,7 @@ def _enrich_team(team: Dict[str, Any]) -> Dict[str, Any]:
         f"{planner['name']} 학생은 ideaPlanning {_trait(planner, 'ideaPlanning')}점으로 기획 후보입니다.",
         f"{flexible['name']} 학생은 roleFlexibility {_trait(flexible, 'roleFlexibility')}점으로 부족 역할 보완 후보입니다.",
     ]
-    return {
+    enriched = {
         "team_name": team["team_name"],
         "members": members,
         "capacity": team["capacity"],
@@ -624,11 +641,143 @@ def _enrich_team(team: Dict[str, Any]) -> Dict[str, Any]:
         "assignment_reasons": reasons,
         "warnings": _team_warnings(team),
     }
+    return _apply_fallback_explanation(enriched)
+
+
+def _apply_fallback_explanation(team: Dict[str, Any]) -> Dict[str, Any]:
+    """Add evidence-based service text even when the explanation LLM is unavailable."""
+    members = team["members"]
+    strongest_implementation = _choose_member(members, "implementation")
+    strongest_problem_solver = _choose_member(members, "problemSolving")
+    presenter_name = team["presentation_candidate"]
+    planner_name = team["planning_candidate"]
+    role_names = [role for role, count in team["role_groups"].items() if count]
+    role_text = ", ".join(role_names) if role_names else "기타 역할"
+    strengths = (
+        f"{strongest_implementation['name']}의 개발 실행력과 {strongest_problem_solver['name']}의 문제 해결력을 중심으로 "
+        f"해커톤 구현을 진행할 수 있습니다. {presenter_name}이 발표를 맡고 {planner_name}이 아이디어를 정리해 "
+        "구현부터 발표까지 역할을 연결할 수 있습니다."
+    )
+    if team["warnings"]:
+        weaknesses = " ".join(team["warnings"]) + " 역할을 초기에 명확히 정하고 중간 점검으로 보완해야 합니다."
+    else:
+        lowest_key = min(
+            ALL_TRAIT_KEYS,
+            key=lambda key: (
+                team["personality_averages"].get(key)
+                if key in PERSONALITY_KEYS
+                else team["development_averages"].get(key)
+            ),
+        )
+        weaknesses = (
+            f"상대적으로 {TRAIT_LABELS[lowest_key]} 평균이 낮을 수 있으므로 체크포인트를 짧게 나누고 "
+            "담당자 간 진행 상황을 자주 공유하는 방식으로 보완해야 합니다."
+        )
+    cards = [
+        {
+            "title": "개발 실력 균형",
+            "description": (
+                f"팀 기술 점수 평균은 {team['technical_average']:.2f}, 개발 실행 역량 평균은 "
+                f"{team['execution_average']:.2f}로 구성했습니다."
+            ),
+        },
+        {
+            "title": "핵심 구현과 문제 해결",
+            "description": (
+                f"{strongest_implementation['name']}의 implementation {_trait(strongest_implementation, 'implementation')}점과 "
+                f"{strongest_problem_solver['name']}의 problemSolving {_trait(strongest_problem_solver, 'problemSolving')}점을 "
+                "핵심 개발 역량으로 활용합니다."
+            ),
+        },
+        {
+            "title": "기획·발표 역할 연결",
+            "description": f"{planner_name}이 아이디어를 정리하고 {presenter_name}이 결과 발표를 담당하도록 배치했습니다.",
+        },
+        {
+            "title": "역할 분배",
+            "description": f"{role_text} 역할을 바탕으로 구현 업무를 나누고 유연 역할 후보가 빈 자리를 보완합니다.",
+        },
+    ]
+    team["strengths"] = strengths
+    team["weaknesses"] = weaknesses
+    team["reason_cards"] = cards
+    team["reason"] = " ".join(card["description"] for card in cards)
+    return team
+
+
+def _explanation_context(teams: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [
+        {
+            "team_name": team["team_name"],
+            "members": [
+                {
+                    "name": member["name"],
+                    "role_group": member["role_group"],
+                    "technical_score": member["technical_score"],
+                    "execution_score": member["execution_score"],
+                    "personality_scores": member["personality_scores"],
+                    "development_scores": member["development_scores"],
+                }
+                for member in team["members"]
+            ],
+            "leader": team["leader"],
+            "presentation_candidate": team["presentation_candidate"],
+            "planning_candidate": team["planning_candidate"],
+            "flexible_supporter": team["flexible_supporter"],
+            "role_groups": team["role_groups"],
+            "technical_average": team["technical_average"],
+            "execution_average": team["execution_average"],
+            "warnings": team["warnings"],
+        }
+        for team in teams
+    ]
+
+
+def generate_service_explanations(teams: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Generate strengths, weaknesses, and reason cards without changing teams."""
+    if not is_llm_enabled():
+        return teams
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", """당신은 해커톤 팀 추천 결과 설명 담당자다. 팀 구성과 역할 후보는 이미 확정되었으므로 절대 바꾸지 않는다.
+주어진 학생별 점수와 팀 통계만 근거로 관리자 화면에 표시할 설명을 작성한다.
+strengths는 구현·문제 해결·기획·발표 역할의 구체적인 시너지를 2문장으로 설명한다.
+weaknesses는 실제 낮은 점수나 역할 경고만 언급하고, 해커톤 중 실행 가능한 보완 방법까지 2문장으로 설명한다.
+reason_cards는 2~4개이며 개발 실력 균형 카드를 반드시 포함한다. 점수에 없는 성격이나 경험을 추측하지 않는다.
+reason은 reason_cards의 description을 자연스럽게 이어 붙인다."""),
+        ("human", "확정된 해커톤 팀 근거:\n{context}"),
+    ])
+    try:
+        chain = prompt | _llm().with_structured_output(ServiceExplanationResult)
+        response = chain.invoke({"context": json.dumps(_explanation_context(teams), ensure_ascii=False)})
+        result = response.model_dump() if hasattr(response, "model_dump") else dict(response)
+    except Exception as error:
+        for team in teams:
+            team["explanation_generation_error"] = f"{type(error).__name__}: {error}"
+        return teams
+
+    generated_by_name = {
+        item.get("team_name"): item
+        for item in result.get("teams", [])
+        if isinstance(item, dict)
+    }
+    for team in teams:
+        generated = generated_by_name.get(team["team_name"])
+        if not generated:
+            continue
+        cards = generated.get("reason_cards") or []
+        if not 2 <= len(cards) <= 4:
+            continue
+        team["strengths"] = str(generated.get("strengths") or team["strengths"]).strip()
+        team["weaknesses"] = str(generated.get("weaknesses") or team["weaknesses"]).strip()
+        team["reason_cards"] = cards
+        team["reason"] = str(generated.get("reason") or " ".join(card.get("description", "") for card in cards)).strip()
+    return teams
 
 
 def finalize_node(state: MatchingState) -> Dict[str, Any]:
     best_teams = state["best_teams"]
     final_teams = [_enrich_team(team) for team in best_teams]
+    final_teams = generate_service_explanations(final_teams)
     balance = validate_teams(best_teams, state["analyzed_students"], state["baseline_metrics"])
     if not state.get("llm_available"):
         balance["warnings"] = balance["warnings"] + ["LLM 보정이 비활성화되어 규칙 기반 결과로 확정했습니다."]

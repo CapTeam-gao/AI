@@ -659,6 +659,69 @@ def run_matching(payload: Any = Body(default=None)):
     return build_team_summary(result)
 
 
+@app.post("/matching/hackathon/run")
+# 새 해커톤 10개 성향 점수를 직접 받아 팀 생성, 검증, 설명 생성을 한 번에 실행한다.
+# 기존 캡스톤 분석/매칭/저장 경로와 분리해 두 결과가 서로 덮어쓰이지 않게 한다.
+def run_hackathon_matching(payload: Any = Body(default=None)):
+    from matching_student.hackerton_matching import run_workflow as run_hackathon_workflow
+
+    if isinstance(payload, list):
+        students = payload
+        team_size = 5
+    elif isinstance(payload, dict):
+        students = payload.get("students")
+        team_size = payload.get("team_size") or payload.get("teamSize") or 5
+    else:
+        raise HTTPException(status_code=400, detail="students 목록이 필요합니다.")
+
+    try:
+        team_size = int(team_size)
+    except (TypeError, ValueError) as error:
+        raise HTTPException(status_code=400, detail="team_size는 1 이상의 정수여야 합니다.") from error
+    if team_size < 1:
+        raise HTTPException(status_code=400, detail="team_size는 1 이상의 정수여야 합니다.")
+
+    try:
+        result = run_hackathon_workflow(students, team_size=team_size)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    final_result = result["final_result"]
+    final_teams = final_result.get("final_teams", [])
+    teams = []
+    for team in final_teams:
+        members = team.get("members", [])
+        teams.append({
+            "total_people": len(members),
+            "team_name": team.get("team_name"),
+            "role_counts": team.get("role_groups", {}),
+            "leader": team.get("leader", ""),
+            "presentation_candidate": team.get("presentation_candidate", ""),
+            "planning_candidate": team.get("planning_candidate", ""),
+            "flexible_supporter": team.get("flexible_supporter", ""),
+            "matching_reason": team.get("reason", ""),
+            "reason_cards": team.get("reason_cards", []),
+            "strengths": team.get("strengths", ""),
+            "weaknesses": team.get("weaknesses", ""),
+            "technical_average": team.get("technical_average", 0),
+            "execution_average": team.get("execution_average", 0),
+            "personality_averages": team.get("personality_averages", {}),
+            "development_averages": team.get("development_averages", {}),
+            "warnings": team.get("warnings", []),
+            "members": members,
+        })
+
+    return {
+        "matching_type": "HACKATHON",
+        "total_students": len(result.get("analyzed_students", [])),
+        "total_teams": len(teams),
+        "teams": teams,
+        "balance_result": final_result.get("balance_result", {}),
+        "iteration_count": final_result.get("iteration_count", 0),
+        "finalized_by": final_result.get("finalized_by", ""),
+    }
+
+
 @app.post("/matching/regenerate")
 # 사용자가 입력한 재생성 프롬프트로 현재 추천안을 다시 조정하는 API다.
 # prompt, current_teams, 선택적 students를 받아 재생성 결과 요약을 반환한다.
