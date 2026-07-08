@@ -83,8 +83,15 @@ def _normalize_student(row: Dict[str, Any]) -> Dict[str, Any]:
                 break
 
     student = dict(payload or row)
+    # users 전체 컬럼을 읽을 때 AI 분석과 JSON 저장에 불필요하거나
+    # 직렬화할 수 없는 인증/감사 필드는 학생 입력에서 제거한다.
+    for private_key in ("password", "password_encoded", "created_at", "updated_at"):
+        student.pop(private_key, None)
     student.setdefault("name", row.get("name") or row.get("student_name"))
     student.setdefault("goal", row.get("goal") or row.get("desired_role"))
+    student["survey_completed"] = _as_bool(
+        student.get("survey_completed", row.get("survey_completed"))
+    )
 
     skills = student.get("skills", row.get("skills"))
     stack = student.get("stack", row.get("stack"))
@@ -112,6 +119,44 @@ def _normalize_student(row: Dict[str, Any]) -> Dict[str, Any]:
         else student.get("wantsLeader", row.get("wants_leader"))
     )
 
+    def first_score(*keys: str) -> Any:
+        for key in keys:
+            if student.get(key) is not None:
+                return student.get(key)
+            if row.get(key) is not None:
+                return row.get(key)
+        return None
+
+    hackathon_personality = student.get("hackathon_personality_scores") or student.get("personalityScores")
+    if not isinstance(hackathon_personality, dict):
+        hackathon_personality = {
+            "ideaPlanning": first_score("ideaPlanning", "idea_planning", "personality_idea_planning"),
+            "communication": first_score("communication", "personality_communication"),
+            "roleFlexibility": first_score("roleFlexibility", "role_flexibility", "personality_role_flexibility"),
+            "timePressure": first_score("timePressure", "time_pressure", "personality_time_pressure"),
+            "staminaFocus": first_score("staminaFocus", "stamina_focus", "personality_stamina_focus"),
+        }
+    personality_keys = {"ideaPlanning", "communication", "roleFlexibility", "timePressure", "staminaFocus"}
+    if personality_keys.issubset(hackathon_personality) and all(
+        hackathon_personality[key] is not None for key in personality_keys
+    ):
+        student["hackathon_personality_scores"] = hackathon_personality
+
+    hackathon_development = student.get("hackathon_development_scores") or student.get("developmentScores")
+    if not isinstance(hackathon_development, dict):
+        hackathon_development = {
+            "implementation": first_score("implementation", "development_implementation"),
+            "problemSolving": first_score("problemSolving", "problem_solving", "development_problem_solving"),
+            "completionQuality": first_score("completionQuality", "completion_quality", "development_completion_quality"),
+            "presentation": first_score("presentation", "development_presentation"),
+            "leadership": first_score("leadership", "development_leadership"),
+        }
+    development_keys = {"implementation", "problemSolving", "completionQuality", "presentation", "leadership"}
+    if development_keys.issubset(hackathon_development) and all(
+        hackathon_development[key] is not None for key in development_keys
+    ):
+        student["hackathon_development_scores"] = hackathon_development
+
     return student
 
 
@@ -124,21 +169,10 @@ def fetch_students() -> List[Dict[str, Any]]:
         if table == "users":
             sql = """
             SELECT
-                u.user_id,
-                u.name,
+                u.*,
                 u.student_role AS goal,
-                u.grade,
-                u.wants_leader,
-                u.personality_communication AS communication,
-                u.personality_responsibility AS responsibility,
-                u.personality_collaboration AS collaboration,
-                u.personality_flexibility AS flexibility,
-                u.personality_emotional_stability AS emotionalStability,
-                u.development_leadership AS leadership,
-                u.development_problem_solving AS problemSolving,
-                u.development_implementation AS implementation,
-                u.development_learning_ability AS learningAbility,
-                u.development_planning AS planning,
+                ua.analysis_result AS analysis_result,
+                ua.student_level AS student_level,
                 COALESCE(ua.response_reliability, 'HIGH') AS response_reliability,
                 (SELECT JSON_ARRAYAGG(skill) FROM user_skill WHERE user_user_id = u.user_id) AS stack,
                 (SELECT JSON_ARRAYAGG(experience) FROM user_experience WHERE user_user_id = u.user_id) AS experience,
@@ -326,14 +360,42 @@ def save_analysis_results(results: List[Dict[str, Any]]) -> None:
     save_json_result("ANALYSIS_RESULT_TABLE", "student_analysis_results", "analysis", results)
 
 
-def fetch_matching_result() -> Optional[Dict[str, Any]]:
-    result = fetch_latest_json_result(
-        "MATCHING_RESULT_TABLE",
-        "team_matching_results",
-        "MATCHING_RESULT_SQL",
-    )
+MATCHING_RESULT_TYPES = {
+    "CAPSTONE": "matching",
+    "HACKATHON": "hackathon_matching",
+}
+
+
+def fetch_matching_result(matching_type: str = "CAPSTONE") -> Optional[Dict[str, Any]]:
+    normalized_type = str(matching_type or "CAPSTONE").strip().upper()
+    result_type = MATCHING_RESULT_TYPES.get(normalized_type)
+    if result_type is None:
+        raise ValueError(f"지원하지 않는 매칭 유형입니다: {matching_type}")
+
+    custom_sql = os.getenv("MATCHING_RESULT_SQL")
+    if custom_sql and normalized_type == "CAPSTONE":
+        result = fetch_latest_json_result(
+            "MATCHING_RESULT_TABLE",
+            "team_matching_results",
+            "MATCHING_RESULT_SQL",
+        )
+    else:
+        table = _env("MATCHING_RESULT_TABLE", "team_matching_results")
+        sql = f"SELECT result_json FROM `{table}` WHERE result_type = %s ORDER BY id DESC LIMIT 1"
+        try:
+            with get_connection() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(sql, (result_type,))
+                    row = cursor.fetchone()
+        except MySQLError:
+            return None
+        result = _extract_json_from_row(row) if row else None
     return result if isinstance(result, dict) else None
 
 
-def save_matching_result(result: Dict[str, Any]) -> None:
-    save_json_result("MATCHING_RESULT_TABLE", "team_matching_results", "matching", result)
+def save_matching_result(result: Dict[str, Any], matching_type: str = "CAPSTONE") -> None:
+    normalized_type = str(matching_type or "CAPSTONE").strip().upper()
+    result_type = MATCHING_RESULT_TYPES.get(normalized_type)
+    if result_type is None:
+        raise ValueError(f"지원하지 않는 매칭 유형입니다: {matching_type}")
+    save_json_result("MATCHING_RESULT_TABLE", "team_matching_results", result_type, result)
