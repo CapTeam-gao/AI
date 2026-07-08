@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 
 from fastapi import Body, FastAPI, HTTPException
 
-from capteam_db import fetch_matching_result
+from capteam_db import fetch_matching_result, save_matching_result
 from capteam_traits import (
     build_leader_reason,
     build_team_trait_risks,
@@ -84,6 +84,18 @@ def build_analysis_response_result(result: Dict[str, Any]) -> Dict[str, Any]:
 def _copy_trait_scores(target: Dict[str, Any], source: Dict[str, Any]) -> None:
     personality = source.get("personality_scores") or source.get("personalityScores") or {}
     development = source.get("development_scores") or source.get("developmentScores") or {}
+    hackathon_personality = (
+        source.get("hackathon_personality_scores")
+        or source.get("hackathonPersonalityScores")
+        or source.get("personalityScores")
+        or {}
+    )
+    hackathon_development = (
+        source.get("hackathon_development_scores")
+        or source.get("hackathonDevelopmentScores")
+        or source.get("developmentScores")
+        or {}
+    )
 
     target.update({
         "communication": _first_present(source, "communication") or personality.get("communication"),
@@ -109,6 +121,20 @@ def _copy_trait_scores(target: Dict[str, Any], source: Dict[str, Any]) -> None:
         ),
         "planning": _first_present(source, "planning") or development.get("planning"),
     })
+    hackathon_personality_keys = {
+        "ideaPlanning", "communication", "roleFlexibility", "timePressure", "staminaFocus"
+    }
+    hackathon_development_keys = {
+        "implementation", "problemSolving", "completionQuality", "presentation", "leadership"
+    }
+    if hackathon_personality_keys.issubset(hackathon_personality):
+        target["hackathon_personality_scores"] = {
+            key: hackathon_personality[key] for key in hackathon_personality_keys
+        }
+    if hackathon_development_keys.issubset(hackathon_development):
+        target["hackathon_development_scores"] = {
+            key: hackathon_development[key] for key in hackathon_development_keys
+        }
 
 
 # API 요청으로 받은 학생 목록을 AI 분석 함수가 쓰는 표준 구조로 변환한다.
@@ -172,16 +198,20 @@ def parse_matching_request(payload: Any) -> Dict[str, Any]:
 
 # MySQL에 저장된 최신 매칭 결과를 우선 읽고, 없으면 로컬 matching_output.json을 읽는다.
 # 둘 다 없으면 API 응답용 404 예외를 발생시킨다.
-def load_matching_output() -> Dict[str, Any]:
-    matching_output = fetch_matching_result()
+def load_matching_output(matching_type: str = "CAPSTONE") -> Dict[str, Any]:
+    normalized_type = str(matching_type or "CAPSTONE").strip().upper()
+    try:
+        matching_output = fetch_matching_result(normalized_type)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     if matching_output:
         return matching_output
 
-    if MATCHING_OUTPUT_PATH.exists() and MATCHING_OUTPUT_PATH.stat().st_size > 0:
+    if normalized_type == "CAPSTONE" and MATCHING_OUTPUT_PATH.exists() and MATCHING_OUTPUT_PATH.stat().st_size > 0:
         with open(MATCHING_OUTPUT_PATH, "r", encoding="utf-8") as file:
             return json.load(file)
 
-    raise HTTPException(status_code=404, detail="MySQL 또는 matching_output.json에 매칭 결과가 없습니다.")
+    raise HTTPException(status_code=404, detail=f"저장된 {normalized_type} 매칭 결과가 없습니다.")
 
 
 # 워크플로우 전체 결과에서 화면에 쓸 final_result 부분만 꺼낸다.
@@ -611,6 +641,44 @@ def build_team_summary(matching_output: Dict[str, Any] = None) -> Dict[str, Any]
     }
 
 
+def build_hackathon_summary(matching_output: Dict[str, Any]) -> Dict[str, Any]:
+    final_result = matching_output.get("final_result") or matching_output
+    final_teams = final_result.get("final_teams", [])
+    teams = []
+    for team in final_teams:
+        members = team.get("members", [])
+        teams.append({
+            "total_people": len(members),
+            "team_name": team.get("team_name"),
+            "role_counts": team.get("role_groups", {}),
+            "leader": team.get("leader", ""),
+            "presentation_candidate": team.get("presentation_candidate", ""),
+            "planning_candidate": team.get("planning_candidate", ""),
+            "flexible_supporter": team.get("flexible_supporter", ""),
+            "matching_reason": team.get("reason", ""),
+            "reason_cards": team.get("reason_cards", []),
+            "strengths": team.get("strengths", ""),
+            "weaknesses": team.get("weaknesses", ""),
+            "technical_average": team.get("technical_average", 0),
+            "execution_average": team.get("execution_average", 0),
+            "personality_averages": team.get("personality_averages", {}),
+            "development_averages": team.get("development_averages", {}),
+            "warnings": team.get("warnings", []),
+            "members": members,
+        })
+    return {
+        "matching_type": "HACKATHON",
+        "total_students": len(matching_output.get("analyzed_students", [])),
+        "total_teams": len(teams),
+        "changed": final_result.get("changed", False),
+        "change_summary": final_result.get("change_summary", ""),
+        "teams": teams,
+        "balance_result": final_result.get("balance_result", {}),
+        "iteration_count": final_result.get("iteration_count", 0),
+        "finalized_by": final_result.get("finalized_by", ""),
+    }
+
+
 @app.get("/health")
 # 서버가 살아 있는지 확인하는 헬스체크 API다.
 # 입력 없이 {"status": "ok"}를 반환한다.
@@ -621,8 +689,12 @@ def health():
 @app.get("/teams/summary")
 # 저장된 최신 매칭 결과를 프론트 요약 응답으로 반환하는 API다.
 # 입력 없이 MySQL/파일 결과를 읽어 build_team_summary 결과를 반환한다.
-def teams_summary():
-    return build_team_summary()
+def teams_summary(matching_type: str = "CAPSTONE"):
+    normalized_type = str(matching_type or "CAPSTONE").strip().upper()
+    result = load_matching_output(normalized_type)
+    if normalized_type == "HACKATHON":
+        return build_hackathon_summary(result)
+    return build_team_summary(result)
 
 
 @app.post("/analysis/run")
@@ -667,6 +739,85 @@ def run_matching(payload: Any = Body(default=None)):
 
     result = run_workflow(force_rematch=True, analyzed_students=analyzed_students)
     return build_team_summary(result)
+
+
+@app.post("/matching/hackathon/run")
+# 새 해커톤 10개 성향 점수를 직접 받아 팀 생성, 검증, 설명 생성을 한 번에 실행한다.
+# 기존 캡스톤 분석/매칭/저장 경로와 분리해 두 결과가 서로 덮어쓰이지 않게 한다.
+def run_hackathon_matching(payload: Any = Body(default=None)):
+    from student_analysis.analysis_llm import get_analyze_stu
+    from matching_student.hackerton_matching import run_workflow as run_hackathon_workflow
+
+    if isinstance(payload, list):
+        students = payload
+        team_size = 5
+    elif isinstance(payload, dict):
+        students = payload.get("students")
+        team_size = payload.get("team_size") or payload.get("teamSize") or 5
+    else:
+        raise HTTPException(status_code=400, detail="students 목록이 필요합니다.")
+
+    try:
+        team_size = int(team_size)
+    except (TypeError, ValueError) as error:
+        raise HTTPException(status_code=400, detail="team_size는 1 이상의 정수여야 합니다.") from error
+    if team_size < 1:
+        raise HTTPException(status_code=400, detail="team_size는 1 이상의 정수여야 합니다.")
+
+    try:
+        request_students = normalize_request_students(students)
+        analyzed_students = get_analyze_stu(request_students)
+        result = run_hackathon_workflow(analyzed_students, team_size=team_size)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    save_matching_result(result, matching_type="HACKATHON")
+    return build_hackathon_summary(result)
+
+
+@app.get("/matching/hackathon/summary")
+def hackathon_matching_summary():
+    return build_hackathon_summary(load_matching_output("HACKATHON"))
+
+
+@app.post("/matching/hackathon/regenerate")
+def regenerate_hackathon_matching(payload: Optional[Dict[str, Any]] = Body(default=None)):
+    from student_analysis.analysis_llm import get_analyze_stu
+    from matching_student.hackerton_matching import run_regenerate_workflow
+
+    payload = payload or {}
+    prompt = str(
+        payload.get("prompt")
+        or payload.get("regeneration_prompt")
+        or payload.get("regenerationPrompt")
+        or ""
+    ).strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="재생성 프롬프트가 비어 있습니다.")
+
+    saved_result = load_matching_output("HACKATHON")
+    request_students = normalize_request_students(payload.get("students"))
+    if request_students is not None:
+        analyzed_students = get_analyze_stu(request_students)
+    else:
+        analyzed_students = saved_result.get("analyzed_students", [])
+    current_teams = (
+        payload.get("current_teams")
+        or payload.get("currentTeams")
+        or (saved_result.get("final_result") or {}).get("final_teams")
+    )
+    try:
+        result = run_regenerate_workflow(
+            prompt=prompt,
+            current_teams=current_teams,
+            analyzed_students=analyzed_students,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+    save_matching_result(result, matching_type="HACKATHON")
+    return build_hackathon_summary(result)
 
 
 @app.post("/matching/regenerate")
