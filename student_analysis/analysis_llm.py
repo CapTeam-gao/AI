@@ -526,9 +526,14 @@ def get_analyze_stu(
         # 분석 결과 저장
 
     results = ensure_preference_profiles([results_by_index[index] for index in range(len(datas))])
-    save_analysis_results(results)
-
-    print("분석 결과 MySQL 저장 완료")
+    try:
+        save_analysis_results(results)
+        print("분석 결과 MySQL 저장 완료")
+    except Exception as error:
+        print(
+            f"분석 결과 MySQL 저장 실패, API 응답은 계속 반환합니다: {type(error).__name__}: {error}",
+            flush=True,
+        )
 
     return results
 
