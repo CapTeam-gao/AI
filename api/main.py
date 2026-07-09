@@ -647,10 +647,16 @@ def build_hackathon_summary(matching_output: Dict[str, Any]) -> Dict[str, Any]:
     teams = []
     for team in final_teams:
         members = team.get("members", [])
+        role_groups = team.get("role_groups", {})
+        role_counts = [
+            {"role_group": role_group, "count": count}
+            for role_group, count in role_groups.items()
+            if count
+        ]
         teams.append({
             "total_people": len(members),
             "team_name": team.get("team_name"),
-            "role_counts": team.get("role_groups", {}),
+            "role_counts": role_counts,
             "leader": team.get("leader", ""),
             "presentation_candidate": team.get("presentation_candidate", ""),
             "planning_candidate": team.get("planning_candidate", ""),
