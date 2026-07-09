@@ -29,18 +29,22 @@ from capteam_traits import ensure_trait_profile
 #클로드코드, codex한번 사서 써봐야할듯.
 #이름 말고 학번으로 주 식별자.
 # 매칭에서 사용하는 기술 점수가 안정적으로 이어지도록 5단계 등급과 스택 점수를 함께 관리한다.
-# 객체를 한 번만 생성해 학생별 분석 호출에서 재사용한다.
-# GPT-5.4가 학생 경험의 경계 사례를 충분히 검토하도록 기본 추론 강도는 medium으로 둔다.
-llm = ChatOpenAI(
-    model=os.getenv("OPENAI_ANALYSIS_MODEL", "gpt-5.4"),
-    reasoning_effort=os.getenv("OPENAI_ANALYSIS_REASONING_EFFORT", "medium"),
-    timeout=int(os.getenv("OPENAI_TIMEOUT", "120")),
-    max_retries=int(os.getenv("OPENAI_MAX_RETRIES", "2")),
-    temperature = 0
-)
+# 서버 시작 시 API 키 문제로 죽지 않도록 OpenAI 객체는 실제 학생 분석 호출 시점에 지연 생성한다.
+# 생성 후에는 학생별 분석 호출에서 재사용한다.
+llm = None
 
 
 def get_llm():
+    global llm
+    if llm is None:
+        # GPT-5.4가 학생 경험의 경계 사례를 충분히 검토하도록 기본 추론 강도는 medium으로 둔다.
+        llm = ChatOpenAI(
+            model=os.getenv("OPENAI_ANALYSIS_MODEL", "gpt-5.4"),
+            reasoning_effort=os.getenv("OPENAI_ANALYSIS_REASONING_EFFORT", "medium"),
+            timeout=int(os.getenv("OPENAI_TIMEOUT", "120")),
+            max_retries=int(os.getenv("OPENAI_MAX_RETRIES", "2")),
+            temperature=0,
+        )
     return llm
 
 
