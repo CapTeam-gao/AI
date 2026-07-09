@@ -2,6 +2,7 @@ from typing import Any,List,TypedDict,Dict,Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import copy
 import os
+import sys
 import json
 import math
 import re
@@ -10,8 +11,13 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
+
+BASE_DIR = Path(__file__).resolve().parents[1]
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", "..", ".env"), override=False)
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"), override=True)
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"), override=False)
 
 from capteam_db import fetch_analysis_results, fetch_matching_result, fetch_students, save_matching_result
 
@@ -40,10 +46,10 @@ from capteam_traits import (
 )
 #역할을 다양하게 균형 잡힌 팀 1순위 , 선호팀원 2순위 
 # OpenAI Chat 모델 객체를 생성해서 반환한다.
-# 기본값은 배정 이유/팀 분석 품질을 위해 gpt-5-mini를 쓰고,
+# 기본값은 학생 분석 모델과 동일한 gpt-5.4를 쓰고,
 # OPENAI_MATCHING_MODEL 환경변수로 쉽게 교체할 수 있게 둔다.
 def get_llm(model=None):
-    model = model or os.getenv("OPENAI_MATCHING_MODEL", "gpt-5-mini")
+    model = model or os.getenv("OPENAI_MATCHING_MODEL", "gpt-5.4")
     kwargs = {
         "model": model,
         "timeout": int(os.getenv("OPENAI_TIMEOUT", "120")),
@@ -67,15 +73,28 @@ class MatchingState(TypedDict):
     final_result:Dict[str,Any] #최종 결과 저장
     llm_result:Dict[str,Any] #llm이 생성한 매칭상태 저장
     iteration_count: int #팀 생성 수정한 횟수 저장하여 무한반복을 막음
+    best_candidate: Dict[str, Any] #일반 팀 생성에서 현재까지 검증 점수가 가장 좋은 후보
+    best_balance_result: Dict[str, Any] #최고 후보의 코드 검증 결과
+    best_team_evaluations: List[Dict[str, Any]] #최고 후보의 팀별 검증 결과
+    best_candidate_score: List[float] #후보 비교용 점수. 앞 값부터 낮을수록 좋음
+    last_adjustment_improved: bool #직전 LLM 수정안이 이전 최고 후보보다 개선됐는지 여부
+    regeneration_mode: bool #사용자 프롬프트 기반 재생성 경로인지 여부
+    regeneration_base_teams: List[Dict[str, Any]] #재생성 전 팀을 보존해 불필요한 전체 재배치를 막는 기준
 #team으로 알고리즘으로 team상태 저장하고
 #llm_result로 llm이 제안한 팀 상태 저장하고
 #검증할때 실패하면 다시 알고리즘 보고 할수있도록 알고리즘은 그대로 두고 llm_result만 계속 덮어 씌어지면서 수정
 
 # skill_level을 팀 생성용 숫자 점수로 바꾸기 위한 기준.
-# 팀 간 실력 균형을 맞추려면 "보통", "낮음" 같은 문자열보다 숫자가 다루기 편함.
+# 팀 간 실력 균형을 맞추려면 5단계 문자열보다 숫자가 다루기 편함.
 SKILL_LEVEL_SCORE = {
-    "높음": 3,
-    "보통": 2,
+    "상": 5,
+    "중상": 4,
+    "중": 3,
+    "중하": 2,
+    "하": 1,
+    # 기존 3단계 분석 캐시 호환
+    "높음": 5,
+    "보통": 3,
     "낮음": 1,
 }
 
@@ -165,7 +184,7 @@ def get_technical_score(student):
     # 학생 한 명의 기술 점수 계산.
     # skill_level을 큰 기준으로 보고, stack_score 평균을 보조 점수로 더함.
     level_score = SKILL_LEVEL_SCORE.get(student.get('skill_level'),1)
-    #ex skill_level이 보통이면 skill_level_score에서 보통에 value가 2여서 2를 저장
+    # 신규 5단계와 기존 3단계 모두 위 점수표로 변환한다.
     stack_score = parse_stack_score(student.get('stack_score',""))
     #stack_score가져와서 함수써서 숫자만 추출함 없으면 빈 문자열.
     return level_score * 10 + stack_score
@@ -693,6 +712,63 @@ def build_trait_complements(members: List[Dict[str, Any]]) -> List[Dict[str, Any
     return complements[:6]
 
 
+PERSONALITY_REASON_TRAITS = {
+    "communication",
+    "responsibility",
+    "collaboration",
+    "flexibility",
+    "emotionalStability",
+}
+
+
+# 배정 이유에 사용할 신뢰 가능한 성격 성향 근거를 이름과 함께 정리한다.
+# LOW 신뢰도 응답은 제외하고 점수 대신 성향 라벨과 보완 관계만 전달한다.
+def build_personality_reason_evidence(members: List[Dict[str, Any]], limit: int = 3) -> Dict[str, Any]:
+    reliable_members = [
+        member
+        for member in members
+        if get_response_reliability(member) != "LOW"
+    ]
+    complements = []
+    for complement in build_trait_complements(reliable_members):
+        if complement.get("trait") not in PERSONALITY_REASON_TRAITS:
+            continue
+        complements.append({
+            "trait": complement.get("label"),
+            "member_to_support": (complement.get("low_member") or {}).get("name"),
+            "supporters": [
+                supporter.get("name")
+                for supporter in complement.get("supporters", [])
+                if supporter.get("name")
+            ],
+        })
+        if len(complements) >= limit:
+            break
+
+    strengths = []
+    for member in reliable_members:
+        personality_scores = member.get("personality_scores", {})
+        high_traits = [
+            {
+                "trait": TRAIT_LABELS.get(trait, trait),
+                "score": score,
+            }
+            for trait, score in personality_scores.items()
+            if trait in PERSONALITY_REASON_TRAITS and score >= 4
+        ]
+        high_traits.sort(key=lambda item: item["score"], reverse=True)
+        if high_traits:
+            strengths.append({
+                "name": member.get("name"),
+                "traits": [item["trait"] for item in high_traits[:2]],
+            })
+
+    return {
+        "complements": complements,
+        "strengths": strengths[: max(2, limit * 2)],
+    }
+
+
 # 후보 팀 결과와 학생 분석을 받아 이유 생성/보정용 팀 context를 만든다.
 # 팀별 멤버, 역할 분포, 대표 기술, 성향 보완 관계, 성향 평균을 담아 반환한다.
 def build_reason_context(candidate_result, analyzed_students):
@@ -785,7 +861,7 @@ def get_matching_prompt_chain():
 역할:
 - 알고리즘 초안을 기본 정답으로 보고, 자연어 분석상 명확히 더 좋은 조합이 있을 때만 최소한으로 보정한다.
 - 보정이 필요하지 않으면 initial_teams를 그대로 유지하고 이유만 설명한다.
-- 팀별 총점, 역할 다양성, 낮음 학생의 지원 가능성을 함께 본다.
+- 팀별 총점, 역할 다양성, 하위 등급 학생의 지원 가능성을 함께 본다.
 - 성격 성향과 개발 성향 점수는 팀 보완 관계를 판단할 때 사용하되, reason에는 숫자 점수를 직접 쓰지 않는다.
 - preferred_members는 강하게 고려하되, 점수/역할군/성향 균형을 깨면 선호를 분리할 수 있다.
 
@@ -794,7 +870,7 @@ def get_matching_prompt_chain():
 - 팀 수는 initial_teams의 팀 수와 동일하게 유지한다.
 - 각 팀 인원 차이는 1명 이하를 유지한다.
 - 팀 총점 차이를 크게 악화시키는 재배정은 하지 않는다.
-- 낮음 학생은 가능하면 보통 또는 높음 학생과 함께 둔다.
+- 하 또는 낮음 학생은 가능하면 중 이상의 학생과 함께 둔다.
 - 같은 role_group만으로 구성된 팀은 가능하면 피하되, game 역할군은 프로젝트 특성상 가능한 같은 팀에 유지한다.
 - suggestion, strength, weakness는 내부 판단 근거로만 사용하고 reason에 학생별 분석문을 옮겨 쓰지 않는다.
 - 성향/개발 점수는 전체 점수표처럼 나열하지 말고, 낮은 성향을 높은 성향의 팀원이 보완하는 관계를 설명할 때만 사용한다.
@@ -1090,8 +1166,12 @@ def validation_balance_team(candidate_result, analyzed_students, base_teams=None
         elif team_status["member_count"] > 5:
             team_errors.append(f"팀 인원이 5명을 초과했습니다. member_count={team_status['member_count']}")
 
-        if team_status["skill_levels"].get("낮음", 0) == team_status["member_count"]:
-            team_errors.append("낮음 학생만으로 구성된 팀입니다.")
+        lower_level_count = (
+            team_status["skill_levels"].get("하", 0)
+            + team_status["skill_levels"].get("낮음", 0)
+        )
+        if lower_level_count == team_status["member_count"]:
+            team_errors.append("하위 등급 학생만으로 구성된 팀입니다.")
 
         only_role_group = next(iter(team_status["role_groups"]), None)
         if (
@@ -1426,6 +1506,107 @@ def evaluate_balance_node(state: MatchingState) -> Dict[str, Any]:
         "team_evaluations": team_evaluations,
     }
 
+
+# 일반 팀 생성 후보를 구조 오류, 전체 오류, 점수 격차, 선호 미반영, 경고 순서로 비교한다.
+# 반환 tuple은 앞 항목부터 낮을수록 더 좋은 후보다.
+def build_candidate_quality_score(
+    balance_result: Dict[str, Any],
+    expected_team_count: int,
+) -> tuple:
+    algorithm_result = balance_result.get("algorithm_result") or balance_result
+    member_counts = algorithm_result.get("member_counts", [])
+    team_count = int(algorithm_result.get("team_count", 0) or 0)
+    structural_error = bool(
+        algorithm_result.get("missing_names")
+        or algorithm_result.get("duplicate_names")
+        or algorithm_result.get("unknown_names")
+        or (expected_team_count and team_count != expected_team_count)
+        or any(count < 3 or count > 5 for count in member_counts)
+        or (member_counts and max(member_counts) - min(member_counts) > 1)
+    )
+    score_gap = float(algorithm_result.get("score_gap", 0) or 0)
+    hard_score_gap = float(algorithm_result.get("hard_score_gap", 0) or 0)
+    score_gap_excess = max(0.0, score_gap - hard_score_gap)
+
+    return (
+        int(structural_error),
+        len(algorithm_result.get("errors", [])),
+        round(score_gap_excess, 2),
+        len(algorithm_result.get("unmet_preference_pairs", [])),
+        len(algorithm_result.get("warnings", [])),
+    )
+
+
+# 알고리즘 팀 list와 LLM 결과 dict를 동일한 추적 형태로 맞춘다.
+def normalize_tracked_candidate(candidate: Any, source: str) -> Dict[str, Any]:
+    if isinstance(candidate, dict):
+        normalized = copy.deepcopy(candidate)
+    else:
+        normalized = {
+            "final_teams": copy.deepcopy(get_candidate_teams(candidate)),
+            "changed": False,
+            "change_summary": "규칙 기반 알고리즘 초안입니다.",
+            "validation_notes": "일반 팀 생성 후보 비교에서 알고리즘 초안이 선택되었습니다.",
+        }
+    normalized["candidate_source"] = source
+    return normalized
+
+
+# 일반 팀 생성에서만 알고리즘 초안과 모든 LLM 후보를 비교하고 최고 후보를 보존한다.
+# 재생성 워크플로우는 이 노드를 호출하지 않는다.
+def evaluate_normal_workflow_node(state: MatchingState) -> Dict[str, Any]:
+    evaluation_update = evaluate_balance_node(state)
+    balance_result = evaluation_update["balance_result"]
+    team_evaluations = evaluation_update["team_evaluations"]
+    expected_team_count = len(state.get("teams", []))
+    current_candidate = normalize_tracked_candidate(
+        state.get("llm_result") or state.get("teams", []),
+        "llm_candidate" if state.get("llm_result") else "algorithm",
+    )
+    current_score = build_candidate_quality_score(balance_result, expected_team_count)
+
+    best_candidate = state.get("best_candidate")
+    best_balance_result = state.get("best_balance_result")
+    best_team_evaluations = state.get("best_team_evaluations")
+    best_score = tuple(state.get("best_candidate_score") or [])
+
+    if not best_candidate:
+        algorithm_balance, algorithm_evaluations = validation_balance_team(
+            candidate_result=state.get("teams", []),
+            analyzed_students=state.get("analyzed_students", []),
+            base_teams=state.get("teams", []),
+        )
+        algorithm_score = build_candidate_quality_score(
+            algorithm_balance,
+            expected_team_count,
+        )
+        if algorithm_score < current_score:
+            best_candidate = normalize_tracked_candidate(state.get("teams", []), "algorithm")
+            best_balance_result = algorithm_balance
+            best_team_evaluations = algorithm_evaluations
+            best_score = algorithm_score
+        else:
+            best_candidate = current_candidate
+            best_balance_result = balance_result
+            best_team_evaluations = team_evaluations
+            best_score = current_score
+
+    improved = current_score < best_score
+    if improved:
+        best_candidate = current_candidate
+        best_balance_result = balance_result
+        best_team_evaluations = team_evaluations
+        best_score = current_score
+
+    return {
+        **evaluation_update,
+        "best_candidate": best_candidate,
+        "best_balance_result": best_balance_result,
+        "best_team_evaluations": best_team_evaluations,
+        "best_candidate_score": list(best_score),
+        "last_adjustment_improved": improved,
+    }
+
 #llm 검증로직
 #팀 하나에 대한 평가
 # LLM이 팀 하나의 정성 평가를 반환할 때 쓰는 schema다.
@@ -1560,6 +1741,19 @@ def should_adjust(state: MatchingState):
     return "adjust_team_node"
 
 
+# 일반 팀 생성은 직전 수정이 최고 후보를 갱신했을 때만 다음 LLM 수정을 허용한다.
+# 재생성 워크플로우는 기존 while 조건을 사용하므로 이 분기를 호출하지 않는다.
+def should_adjust_normal_workflow(state: MatchingState):
+    balance_result = state.get("balance_result", {})
+    if balance_result.get("is_balanced") and not balance_result.get("need_adjustment"):
+        return "finalize_node"
+    if state.get("iteration_count", 0) >= MAX_ITERATION:
+        return "finalize_node"
+    if state.get("iteration_count", 0) > 0 and not state.get("last_adjustment_improved", False):
+        return "finalize_node"
+    return "adjust_team_node"
+
+
 
 
 
@@ -1577,6 +1771,26 @@ def should_adjust(state: MatchingState):
 # TeamMatchingResult, FinalTeam, get_llm()은 위에서 정의한 것을 재사용한다.
 # 검증 실패한 팀 후보를 LLM이 다시 조정하도록 하는 프롬프트 chain을 만든다.
 # 현재 후보, 알고리즘 초안, 검증 결과, 조정 이력을 입력 변수로 사용한다.
+def build_adjustment_scope_rules(regeneration_mode: bool) -> str:
+    if not regeneration_mode:
+        return "일반 검증 수정이므로 current_candidate에서 오류가 있는 부분만 최소 수정한다."
+
+    return """
+    이 작업은 사용자 프롬프트 기반 재생성이다.
+    - 우선순위는 1) 중복/누락/없는 이름/팀 수/인원 차이 필수 규칙, 2) 사용자 요청 반영, 3) 역할·점수·성향 균형, 4) 최소 변경 순서다.
+    - 필수 규칙을 깨지 않는다면 사용자 요청을 반드시 반영한다. 균형이나 변경 범위를 이유로 실행 가능한 사용자 요청을 무시하거나 changed=false로 반환하지 않는다.
+    - 역할·점수 균형과 최소 변경은 사용자 요청을 반영한 후보들 사이에서 더 나은 안을 고르는 기준이다. 사용자 요청보다 앞서는 거절 기준으로 사용하지 않는다.
+    - regeneration_base_teams가 사용자가 보고 있던 변경 전 팀이며, 이를 변경 범위와 균형 비교의 기준으로 사용한다.
+    - 사용자 요청과 직접 관련된 팀, 그리고 인원 교환에 반드시 필요한 상대 팀만 수정한다.
+    - 요청과 무관한 팀은 팀원, 팀장, 팀 이름을 regeneration_base_teams와 동일하게 유지한다.
+    - 학생 이동이 필요하면 한 명을 빼고 다른 학생을 채우는 최소 교환을 우선한다. 남은 학생을 여러 팀에 연쇄적으로 재배치하지 않는다.
+    - 변경되는 각 팀의 역할군 종류 수와 하위 등급 지원 관계를 변경 전과 비교한다. 사용자 요청 자체가 역할 구성을 바꾸라는 내용이 아닌 한 역할 다양성을 낮추지 않는다.
+    - 변경 후 전체 팀 점수 격차를 변경 전보다 키우지 않는 교환안을 우선한다. 특정 팀만 강해지고 다른 팀만 약해지는 교환은 피한다.
+    - 요청을 반영하는 방법이 여러 개라면 이동 인원이 가장 적고 역할 또는 점수 균형 손상이 가장 작은 안을 선택한다.
+    - 출력 직전에 사용자 요청 반영 여부를 먼저 검사한다. 그다음 요청과 무관한 팀이 바뀌었는지, 변경 팀의 역할 다양성과 전체 점수 격차가 불필요하게 악화됐는지 검사하고 요청을 유지한 채 다시 수정한다.
+    """.strip()
+
+
 def get_adjust_team_prompt_chain():
     system_prompt = """
     당신은 캡스톤 프로젝트 팀 매칭 결과를 수정하는 담당자다.
@@ -1590,11 +1804,19 @@ def get_adjust_team_prompt_chain():
     - 팀 수는 algorithm_teams와 동일하게 유지한다.
     - 팀별 인원 차이는 1명 이하로 유지한다.
     - 팀 총점 차이를 크게 악화시키지 않는다.
-    - 낮음 학생은 가능하면 보통 또는 높음 학생과 함께 둔다.
-    - 같은 role_group만으로 구성된 팀은 가능하면 피하되, game 역할군은 프로젝트 특성상 가능한 같은 팀에 유지한다.
-    - preferred_members는 강하게 고려하되, 점수/역할군/성향 균형을 깨면 선호를 분리할 수 있다.
+    - 하 또는 낮음 학생은 가능하면 중 이상의 학생과 함께 둔다.
+    - 같은 role_group만으로 구성된 팀은 가능하면 피하되, game 역할군은 이 규칙의 예외다.
+    - game 역할군 전체 인원이 한 팀 정원 이하이면 반드시 전원을 같은 팀에 배치한다. 이 조건은 점수, 역할 다양성, 성향, 선호보다 우선한다.
+    - 팀 인원, 점수, 역할군, 성향 균형과 algorithm_result.errors 해결을 preferred_members보다 우선한다.
+    - 서로를 선택한 상호 선호 페어는 균형이 비슷한 대안 중에서 우선 유지한다.
+    - 역할군 이동이나 학생 교환 시 상호 선호 페어를 함께 이동해도 균형이 악화되지 않는지 먼저 검토한다.
+    - 선호를 유지하면 필수 오류가 남거나 팀 균형이 뚜렷하게 나빠지는 경우에는 분리할 수 있으며, 이유를 validation_notes에 쓴다.
+    - 단방향 preferred_members도 팀 균형을 해치지 않는 범위에서 고려한다.
     - 팀 안에 wants_leader=true인 학생이 있으면 그 학생들 중 leader_score와 technical_score가 높은 학생을 팀장으로 추천한다.
     - adjustment_history와 같은 수정 패턴을 반복하지 않는다.
+
+    작업별 변경 범위 제한:
+    {adjustment_scope_rules}
 
     반영해야 할 정보:
     - balance_result.algorithm_result.errors는 반드시 해결한다.
@@ -1607,6 +1829,9 @@ def get_adjust_team_prompt_chain():
     - 성격성향/개발성향 점수는 팀 보완 관계를 판단할 때 사용하되, reason에는 숫자 점수를 직접 쓰지 않는다.
 
     계산 규칙:
+    - 역할군 응집 오류를 고칠 때 해당 역할군의 전체 학생 수, 현재 팀별 인원, 이동할 학생 수를 먼저 계산한다.
+    - game 학생 수가 한 팀 정원 이하이면 전원 한 팀 배치가 가능하다. 예: game 학생 5명이고 팀 정원이 5명이면 반드시 5명을 한 팀에 배치하며 불가능하다고 판단하지 않는다.
+    - game 학생 수가 한 팀 정원을 초과할 때만 여러 팀으로 나눌 수 있고, 이 경우 사용하는 팀 수를 최소화한다.
     - 점수는 student_analysis 또는 algorithm_teams에 있는 score 값만 사용한다.
     - 새로운 점수나 skill_level을 만들지 않는다.
     - total_score는 최종 팀원의 score 합으로 작성한다.
@@ -1630,6 +1855,8 @@ def get_adjust_team_prompt_chain():
     user_prompt = """
     아래 검증 실패 정보를 바탕으로 팀 후보를 수정해라.
     algorithm_result.errors의 중복 배정, 누락 학생, 없는 이름, 팀 수 오류를 최우선으로 해결해라.
+    역할군 응집 오류는 전체 대상 인원과 팀 정원을 계산해 반드시 해결해라.
+    최종 출력 전에 game 학생이 함께 배치 가능한데 여러 팀에 나뉘었는지 검사하고, 나뉘었다면 출력하지 말고 다시 배치해라.
     balance_result.llm_result.adjustment_request는 사용자 재생성 요청이다. 중복/누락/없는 이름/팀 수/인원 차이 규칙을 깨지 않는 범위에서 적극적으로 반영해라.
     사용자 요청을 완전히 반영할 수 없으면 가능한 대안을 적용하고 validation_notes에 반영하지 못한 이유를 써라.
     이 단계에서는 팀원 배정, 역할 분포, 팀장만 결정하고 배정 이유는 작성하지 마라.
@@ -1642,6 +1869,9 @@ def get_adjust_team_prompt_chain():
 
     algorithm_teams:
     {algorithm_teams}
+
+    regeneration_base_teams:
+    {regeneration_base_teams}
 
     current_candidate:
     {current_candidate}
@@ -1676,6 +1906,8 @@ def adjust_team_node(state: MatchingState) -> Dict[str, Any]:
     iteration_count = state.get("iteration_count", 0) #무한 반복이 되지 않도록 초기값 0으로하고 state에서 가져옴.
     allowed_student_names = get_student_names(analyzed_students) #학생 이름 중복되지 않도록 검증.
     reason_context = build_reason_context(current_candidate, analyzed_students)
+    regeneration_mode = state.get("regeneration_mode", False)
+    regeneration_base_teams = state.get("regeneration_base_teams") or current_candidate
 
     llm = get_llm()
     structured_llm = llm.with_structured_output(TeamMatchingResult)
@@ -1685,6 +1917,8 @@ def adjust_team_node(state: MatchingState) -> Dict[str, Any]:
         "allowed_student_names": json.dumps(allowed_student_names, ensure_ascii=False),
         "student_analysis": json.dumps(analyzed_students, ensure_ascii=False, indent=0),
         "algorithm_teams": json.dumps(algorithm_teams, ensure_ascii=False, indent=0),
+        "regeneration_base_teams": json.dumps(regeneration_base_teams, ensure_ascii=False, indent=0),
+        "adjustment_scope_rules": build_adjustment_scope_rules(regeneration_mode),
         "current_candidate": json.dumps(current_candidate, ensure_ascii=False, indent=0),
         "reason_context": json.dumps(reason_context, ensure_ascii=False, indent=0),
         "balance_result": json.dumps(balance_result, ensure_ascii=False, indent=0),
@@ -2130,11 +2364,23 @@ def build_final_team_context(final_teams, analyzed_students, trait_complement_li
 # 최종 이유 카드 LLM에 넣을 팀별 context를 만든다.
 # 팀별 멤버, 리더, 학생 분석 근거, 공개 가능한 매칭 근거를 반환한다.
 def build_reason_card_context(final_teams, analyzed_students):
-    return build_final_team_context(
+    contexts = build_final_team_context(
         final_teams,
         analyzed_students,
         trait_complement_limit=3,
     )
+    student_lookup = build_student_lookup(analyzed_students)
+
+    for context in contexts:
+        members = [
+            student_lookup[name]
+            for name in context.get("members", [])
+            if name in student_lookup
+        ]
+        context.pop("trait_complements", None)
+        context["personality_evidence"] = build_personality_reason_evidence(members)
+
+    return contexts
 
 
 def build_team_analysis_context(final_teams, analyzed_students):
@@ -2149,7 +2395,11 @@ def build_team_analysis_context(final_teams, analyzed_students):
 # 팀 이름, reason_cards, 호환용 reason 문자열을 검증한다.
 class FinalTeamReasonCards(BaseModel):
     team_name: str = Field(description="reason_cards를 생성할 팀 이름")
-    reason_cards: List[ReasonCard] = Field(description="팀에서 가장 설득력 있는 배정 이유 카드 최소 2개, 최대 3개")
+    reason_cards: List[ReasonCard] = Field(
+        min_length=2,
+        max_length=4,
+        description="팀에서 가장 설득력 있는 배정 이유 카드 최소 2개, 최대 4개",
+    )
     reason: str = Field(description="reason_cards의 description들을 공백으로 이어 붙인 호환용 요약 설명")
 
 
@@ -2199,13 +2449,6 @@ def get_final_team_analysis_prompt_chain():
     - member_profiles의 response_reliability가 LOW인 학생은 성향 점수를 강한 근거로 쓰지 말고, 기술 스택, 구현 경험, 희망 역할을 중심으로 설명한다.
     - 현재 팀원이 아닌 학생 이름은 절대 언급하지 않는다.
 
-    좋은 strengths 예시:
-    - "김민수와 이서연은 서로 선호한 관계가 반영되어 초반 역할 조율을 빠르게 시작하기 좋은 조합입니다. 김민수의 API 구현 경험과 이서연의 화면 구성 능력이 만나 기능 흐름을 사용자 화면까지 자연스럽게 이어갈 수 있습니다."
-    - "팀장 희망을 표시한 박지훈을 중심으로 AI 실험 결과를 정리하고, 최유진의 앱 구현 역량으로 결과 확인 화면까지 연결하기 좋은 팀입니다. 모델 결과를 사용자가 확인하는 흐름까지 만들 수 있어 추천 기능을 서비스 형태로 보여주기 쉽습니다."
-
-    좋은 weaknesses 예시:
-    - "백엔드 구현을 맡을 학생이 적어 API 설계와 데이터 저장 흐름이 한쪽에 몰릴 수 있습니다. 초반에는 인증이나 부가 기능보다 핵심 API 명세를 먼저 정리해 프론트엔드 연동 지연을 줄이는 방식이 필요합니다."
-    - "화면 구현 경험이 상대적으로 부족해 결과를 사용자가 이해하기 쉬운 UI로 풀어내는 데 시간이 걸릴 수 있습니다. 따라서 복잡한 화면보다 결과 확인 중심의 단순한 흐름부터 구현하는 것이 안정적입니다."
     """
 
     user_prompt = """
@@ -2395,23 +2638,28 @@ def get_final_reason_cards_prompt_chain():
     팀원 배정은 이미 끝났으므로 팀원, 팀 수, 팀 이름, 팀장, 역할 분포를 절대 바꾸지 않는다.
     이 작업은 규칙 기반 fallback 문구를 대체하기 위한 최종 사용자 노출 문구 작성이다.
     절대 알고리즘 설명처럼 쓰지 말고, 실제 관리자가 납득할 수 있는 자연스러운 존댓말 문장으로 작성한다.
-    핵심은 matching_evidence와 member_profiles를 비교해 이 팀에서 가장 설득력 있는 배정 이유를 최소 2개, 필요하면 3개까지 고르는 것이다.
+    핵심은 matching_evidence, member_profiles, personality_evidence를 비교해 이 팀에서 가장 설득력 있는 배정 이유를 기본 3개 고르는 것이다.
+    서로 다른 강한 근거가 충분하면 4개까지 작성하고, 근거가 부족하면 억지로 늘리지 말고 2개만 작성한다.
     matching_evidence에는 알고리즘 초안, 점수 합계, 검증 결과가 없으므로 그런 값을 근거로 쓰지 않는다.
     근거가 약한 리더십/역할 균형/기술 조합 카드를 억지로 만들지 않는다.
 
     출력 규칙:
     - 반드시 지정된 structured output schema에 맞춰 출력한다.
     - teams의 각 항목은 team_name, reason_cards, reason만 포함한다.
-    - 각 팀의 reason_cards는 최소 2개 작성한다.
-    - 서로 다른 강한 근거가 3개 있으면 reason_cards를 3개까지 작성할 수 있다.
-    - reason_cards의 title은 팀의 가장 강한 배정 근거를 구체적으로 드러낸다. 예: 선호 관계와 역할 균형을 함께 살린 팀, AI 결과를 서비스 기능으로 연결하기 좋은 팀, 프론트엔드와 앱 구현 부담을 나눌 수 있는 팀, 백엔드와 데이터 흐름을 안정적으로 맡길 수 있는 팀.
+    - 각 팀의 reason_cards는 기본 3개 작성한다.
+    - 서로 다른 강한 근거가 충분하면 4개까지 작성할 수 있다.
+    - 설득력 있는 근거가 부족하면 반복하거나 추측하지 말고 2개만 작성한다.
+    - reason_cards의 title은 팀의 가장 강한 배정 근거를 구체적으로 드러낸다.
     - "리더십 중심의 팀 운영 가능", "팀장 희망을 반영한 운영 중심 팀"은 팀장 희망 반영이 이 팀의 가장 중요한 이유일 때만 사용한다.
     - 각 description은 제목을 반복하지 말고 130~220자 정도의 2~3문장으로 작성한다.
     - 모든 description 문장은 관리자 화면에 그대로 노출된다. 반드시 존댓말로 작성하고, 모든 문장 끝은 "-습니다", "-입니다", "-됩니다", "-합니다" 중 하나로 끝낸다.
     - 절대 쓰면 안 되는 종결: "한다", "된다", "높인다", "해소한다", "유지한다", "기대된다", "가능하다", "충족시킨다".
     - 절대 쓰면 안 되는 표현: "알고리즘", "규칙 기반", "fallback", "점수 기준", "균형 계산", "시너지 극대화", "동시에 만족", "품질을 높인다".
     - 각 reason_card는 서로 다른 배정 근거를 담는다. 같은 말을 제목만 바꿔 반복하지 않는다.
-    - 두 카드 중 최소 1개는 matching_evidence.key_placements 또는 preference.matched를 반영한다.
+    - personality_evidence에 두 명 이상의 신뢰 가능한 서로 다른 성향 정보가 있으면 성향 보완 또는 성향 강점 조합을 설명하는 카드를 반드시 1개 작성한다.
+    - 성향 카드는 구체적인 팀원 이름과 소통, 책임감, 협업, 유연성 같은 실제 라벨을 사용해 누가 어떤 부분을 보완하는지 설명한다.
+    - 성향이 모두 좋다는 식의 칭찬이나 성향만으로 성과를 단정하는 문장은 쓰지 않는다.
+    - 카드 중 최소 1개는 matching_evidence.key_placements 또는 preference.matched를 반영한다.
     - 최소 1개는 matching_evidence.implementation_connections를 반영해 역할 간 구현 흐름을 설명한다.
     - preference.matched가 있으면 선호 관계를 우선 검토하되, 역할 균형이나 구현 연결이 약하면 억지로 쓰지 않는다.
     - leader_selection은 보조 근거다. 팀장 희망이 실제 팀 운영상 핵심 장점일 때만 한 문장 이내로 언급한다.
@@ -2428,11 +2676,6 @@ def get_final_reason_cards_prompt_chain():
     - 숫자 점수는 되도록 쓰지 말고 "소통이 낮은 편", "책임감이 높은 편", "구현 경험이 풍부한 편"처럼 자연어로 표현한다.
     - reason은 reason_cards의 모든 description을 공백으로 이어 붙여 작성한다.
 
-    좋은 문장 예시:
-    - "김민수가 선호한 이서연을 같은 팀에 배치해 초반 요구사항 정리와 화면 흐름 조율을 빠르게 시작할 수 있습니다. 김민수의 API 구현 강점과 이서연의 화면 구성 능력이 만나 기능 흐름을 사용자 화면까지 자연스럽게 이어갈 수 있습니다."
-    - "팀장 희망을 표시한 박지훈을 운영 중심에 두고, 최유진의 앱 구현 역량을 연결해 분석 결과를 실제 모바일 기능으로 확장하기 좋습니다. 모델 결과를 사용자가 확인하는 흐름까지 만들 수 있어 같은 팀에 배정했습니다."
-    - "김성현은 핵심 기능 구현에 강점이 있고, 소통이 안정적인 팀원이 요구사항 정리와 일정 조율을 보완할 수 있습니다. 개발 속도와 협업 안정성을 함께 가져갈 수 있어 이 조합으로 매칭했습니다."
-
     나쁜 문장 예시:
     - "백엔드, 프론트엔드, 디자인, 앱, AI 역할이 고르게 배치되어 각 담당자가 맡은 범위에 집중하기 쉬운 구성입니다."
     - "Spring Boot와 Java를 활용한 백엔드 구현, Vue를 활용한 프론트엔드 화면 구성, Flutter와 Dart를 활용한 앱 개발이 자연스럽게 이어집니다."
@@ -2448,7 +2691,8 @@ def get_final_reason_cards_prompt_chain():
     {reason_context}
 
     요청:
-    위 최종 팀 구성은 확정된 결과다. 팀원을 바꾸지 말고 각 팀에서 가장 괜찮은 매칭 이유 reason_cards를 최소 2개, 필요하면 3개까지 작성해라.
+    위 최종 팀 구성은 확정된 결과다. 팀원을 바꾸지 말고 각 팀에서 가장 괜찮은 매칭 이유 reason_cards를 기본 3개 작성해라.
+    서로 다른 강한 근거가 충분하면 4개까지 작성하고, 근거가 부족하면 2개만 작성해라.
     """
 
     return ChatPromptTemplate.from_messages([
@@ -2622,6 +2866,40 @@ def finalize_node(state: MatchingState) -> Dict[str, Any]:
         "final_result": final_result
     }
 
+
+# 일반 팀 생성에서 마지막 후보가 아니라 전체 후보 중 검증 점수가 가장 좋은 결과를 확정한다.
+# 기존 finalize_node를 그대로 재사용하되 재생성 경로의 동작은 변경하지 않는다.
+def finalize_normal_workflow_node(state: MatchingState) -> Dict[str, Any]:
+    best_candidate = state.get("best_candidate") or normalize_tracked_candidate(
+        state.get("llm_result") or state.get("teams", []),
+        "llm_candidate" if state.get("llm_result") else "algorithm",
+    )
+    best_balance_result = state.get("best_balance_result") or state.get("balance_result", {})
+    best_team_evaluations = state.get("best_team_evaluations") or state.get("team_evaluations", [])
+    iteration_count = state.get("iteration_count", 0)
+
+    if best_balance_result.get("is_balanced") and not best_balance_result.get("need_adjustment"):
+        finalized_by = "validation_passed"
+    elif iteration_count > 0 and not state.get("last_adjustment_improved", False):
+        finalized_by = "no_improvement"
+    elif iteration_count >= MAX_ITERATION:
+        finalized_by = "max_iteration"
+    else:
+        finalized_by = "manual_finalize"
+
+    # iteration_count를 0으로 전달해 기존 max-iteration fallback이 최고 후보를 덮어쓰지 않게 한다.
+    finalize_state = {
+        **state,
+        "llm_result": best_candidate,
+        "balance_result": best_balance_result,
+        "team_evaluations": best_team_evaluations,
+        "iteration_count": 0,
+    }
+    result = finalize_node(finalize_state)
+    result["final_result"]["iteration_count"] = iteration_count
+    result["final_result"]["finalized_by"] = finalized_by
+    return result
+
 #langgrph로 workflow형식으로 구축
 from langgraph.graph import StateGraph, START, END
 
@@ -2639,9 +2917,9 @@ workflow = StateGraph(MatchingState)
 #노드 추가.
 workflow.add_node('create_team_node',create_team_node) #알고리즘으로 팀 생성
 workflow.add_node('llm_analyzed',llm_analyzed) #llm으로 생성
-workflow.add_node('evaluate_balance_node',evaluate_balance_node) #팀 검증 노드
+workflow.add_node('evaluate_balance_node',evaluate_normal_workflow_node) #일반 팀 생성 전용 최고 후보 추적 검증 노드
 workflow.add_node('adjust_team_node',adjust_team_node) #팀 수정 노드
-workflow.add_node("finalize_node", finalize_node) #최종결과 노드
+workflow.add_node("finalize_node", finalize_normal_workflow_node) #일반 팀 생성 전용 최고 후보 확정 노드
 
 workflow.add_edge(START,'create_team_node')
 workflow.add_edge('create_team_node','llm_analyzed')
@@ -2649,7 +2927,7 @@ workflow.add_edge('llm_analyzed','evaluate_balance_node')
 
 workflow.add_conditional_edges(
     'evaluate_balance_node',
-    should_adjust,#조건 분기 함수 하나라도 수정필요면 adjust_team_node로 보내서 수정시킴.
+    should_adjust_normal_workflow,#개선될 때만 adjust_team_node로 보내서 추가 수정시킴.
     {
         'finalize_node' : 'finalize_node',
         'adjust_team_node' : 'adjust_team_node',
@@ -2708,7 +2986,7 @@ def normalize_current_team_member(member: Any) -> str:
 
 
 # 재생성 요청으로 들어온 팀 하나를 내부 표준 팀 구조로 변환한다.
-# 팀 이름, 멤버 이름, 총점, 역할 분포, 팀장, 기존 이유를 정규화한다.
+# 팀 이름, 멤버 이름, 총점, 역할 분포, 팀장만 유지하고 이전 이유 캐시는 버린다.
 def normalize_current_team(team: Dict[str, Any], index: int) -> Dict[str, Any]:
     members = [
         member_name
@@ -2725,7 +3003,8 @@ def normalize_current_team(team: Dict[str, Any], index: int) -> Dict[str, Any]:
         "total_score": float(team.get("total_score") or team.get("totalScore") or 0),
         "role_groups": normalize_role_groups_for_regenerate(team.get("role_groups") or team.get("roleCounts")),
         "leader": team.get("leader") or team.get("leaderName") or "",
-        "reason": team.get("reason") or team.get("matching_reason") or team.get("matchingReason") or "",
+        "reason": "",
+        "reason_cards": [],
     }
 
 
@@ -2778,7 +3057,9 @@ def build_regenerate_state(
     current_candidate_source = "request_current_teams" if current_candidate else ""
     if not current_candidate:
         cached_result = load_cached_matching_result(force_rematch=False) or {}
-        current_candidate = get_candidate_teams((cached_result.get("final_result") or cached_result))
+        current_candidate = normalize_current_teams(
+            get_candidate_teams((cached_result.get("final_result") or cached_result))
+        )
         current_candidate_source = "cached_matching_result" if current_candidate else ""
     if not current_candidate:
         current_candidate = algorithm_teams
@@ -2823,6 +3104,8 @@ def build_regenerate_state(
             ),
         },
         "iteration_count": 0,
+        "regeneration_mode": True,
+        "regeneration_base_teams": copy.deepcopy(current_candidate),
     }
 
 
@@ -2953,3 +3236,4 @@ def run_workflow(force_rematch=False, analyzed_students: Optional[List[Dict[str,
 if __name__ == "__main__":
     result = run_workflow()
     print(json.dumps(result.get("final_result", result), ensure_ascii=False, indent=0))
+    
