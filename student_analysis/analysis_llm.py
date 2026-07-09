@@ -2,6 +2,7 @@ import os
 import json
 import re
 import time
+from functools import lru_cache
 from dotenv import load_dotenv
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", "..", ".env"), override=False)
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"), override=False)
@@ -29,23 +30,16 @@ from capteam_traits import ensure_trait_profile
 #클로드코드, codex한번 사서 써봐야할듯.
 #이름 말고 학번으로 주 식별자.
 # 매칭에서 사용하는 기술 점수가 안정적으로 이어지도록 5단계 등급과 스택 점수를 함께 관리한다.
-# 서버 시작 시 API 키 문제로 죽지 않도록 OpenAI 객체는 실제 학생 분석 호출 시점에 지연 생성한다.
-# 생성 후에는 학생별 분석 호출에서 재사용한다.
-llm = None
-
-
+@lru_cache(maxsize=1)
 def get_llm():
-    global llm
-    if llm is None:
-        # GPT-5.4가 학생 경험의 경계 사례를 충분히 검토하도록 기본 추론 강도는 medium으로 둔다.
-        llm = ChatOpenAI(
-            model=os.getenv("OPENAI_ANALYSIS_MODEL", "gpt-5.4"),
-            reasoning_effort=os.getenv("OPENAI_ANALYSIS_REASONING_EFFORT", "medium"),
-            timeout=int(os.getenv("OPENAI_TIMEOUT", "120")),
-            max_retries=int(os.getenv("OPENAI_MAX_RETRIES", "2")),
-            temperature=0,
-        )
-    return llm
+    # 서버 import/헬스체크 단계에서는 API 키를 요구하지 않고, 실제 분석 호출 때 한 번만 생성합니다.
+    return ChatOpenAI(
+        model=os.getenv("OPENAI_ANALYSIS_MODEL", "gpt-5.4"),
+        reasoning_effort=os.getenv("OPENAI_ANALYSIS_REASONING_EFFORT", "medium"),
+        timeout=int(os.getenv("OPENAI_TIMEOUT", "120")),
+        max_retries=int(os.getenv("OPENAI_MAX_RETRIES", "2")),
+        temperature=0,
+    )
 
 
 def is_rate_limit_error(error: Exception) -> bool:
@@ -363,7 +357,7 @@ def _get_cached_analysis_for_students(
     }
     student_names = [student.get("name") for student in students if student.get("name")]
 
-    if not student_names or any(name not in cached_by_name for name in student_names):
+    if len(student_names) != len(students) or any(name not in cached_by_name for name in student_names):
         return None
 
     return ensure_preference_profiles([
@@ -536,9 +530,14 @@ def get_analyze_stu(
         # 분석 결과 저장
 
     results = ensure_preference_profiles([results_by_index[index] for index in range(len(datas))])
-    save_analysis_results(results)
-
-    print("분석 결과 MySQL 저장 완료")
+    try:
+        save_analysis_results(results)
+        print("분석 결과 MySQL 저장 완료")
+    except Exception as error:
+        print(
+            f"분석 결과 MySQL 저장 실패, API 응답은 계속 반환합니다: {type(error).__name__}: {error}",
+            flush=True,
+        )
 
     return results
 

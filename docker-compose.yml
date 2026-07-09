@@ -1,5 +1,6 @@
 services:
   ai-server:
+    image: gao-ai-server
     build: .
     container_name: ai-server
     restart: unless-stopped
