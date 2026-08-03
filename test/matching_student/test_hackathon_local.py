@@ -127,6 +127,105 @@ class HackathonLocalTest(unittest.TestCase):
         self.assertFalse(validation["is_valid"])
         self.assertFalse(validation["technical_preserved"])
 
+    def test_regenerate_groups_five_game_students_when_requested(self):
+        students = build_students(15)
+        for index in range(5):
+            students[index]["role"] = "game"
+        normalized = matcher.validate_and_normalize_students(students)
+        summaries = [matcher.make_student_summary(student) for student in normalized]
+        current_teams = [
+            {
+                "team_name": "팀 1",
+                "capacity": 5,
+                "members": [summaries[0], summaries[5], summaries[6], summaries[7], summaries[8]],
+            },
+            {
+                "team_name": "팀 2",
+                "capacity": 5,
+                "members": [summaries[1], summaries[2], summaries[9], summaries[10], summaries[11]],
+            },
+            {
+                "team_name": "팀 3",
+                "capacity": 5,
+                "members": [summaries[3], summaries[4], summaries[12], summaries[13], summaries[14]],
+            },
+        ]
+        raw_same_as_current = {
+            "teams": [
+                {"team_name": team["team_name"], "members": [member["name"] for member in team["members"]]}
+                for team in current_teams
+            ],
+            "change_summary": "기존 팀을 유지했습니다.",
+        }
+
+        with (
+            patch("matching_student.hackerton_matching.is_llm_enabled", return_value=True),
+            patch("matching_student.hackerton_matching._request_user_regeneration", return_value=raw_same_as_current),
+        ):
+            result = matcher.run_regenerate_workflow(
+                prompt="게임 역할 학생들은 5명씩 붙여줘",
+                current_teams=current_teams,
+                analyzed_students=normalized,
+            )
+
+        final_teams = result["final_result"]["final_teams"]
+        game_counts = [
+            sum(member["role_group"] == "game" for member in team["members"])
+            for team in final_teams
+        ]
+        self.assertIn(5, game_counts)
+        self.assertTrue(result["final_result"]["changed"])
+        self.assertEqual("validated_regeneration", result["final_result"]["finalized_by"])
+
+    def test_initial_matching_groups_mutual_preferred_members_when_balance_allows(self):
+        students = build_students(10)
+        students[0]["preferred_members"] = [students[9]["name"]]
+        students[9]["preferred_members"] = [students[0]["name"]]
+
+        normalized = matcher.validate_and_normalize_students(students)
+        teams = matcher.create_initial_teams(normalized, team_size=5)
+        team_by_name = {
+            member["name"]: team["team_name"]
+            for team in teams
+            for member in team["members"]
+        }
+
+        self.assertEqual(team_by_name[students[0]["name"]], team_by_name[students[9]["name"]])
+        self.assertEqual(
+            0,
+            matcher._unmet_preference_count(
+                teams,
+                {student["name"] for student in map(matcher.make_student_summary, normalized)},
+            ),
+        )
+
+    def test_preferred_member_ids_are_normalized_like_capstone(self):
+        students = build_students(10)
+        students[0]["preferred_members"] = [students[9]["user_id"]]
+        students[9]["preferredMembers"] = [students[0]["user_id"]]
+        students[0]["wantsLeader"] = True
+
+        normalized = matcher.validate_and_normalize_students(students)
+        teams = matcher.create_initial_teams(normalized, team_size=5)
+        team_by_name = {
+            member["name"]: team["team_name"]
+            for team in teams
+            for member in team["members"]
+        }
+
+        self.assertEqual([students[9]["name"]], normalized[0]["preferred_members"])
+        self.assertEqual([students[0]["name"]], normalized[9]["preferred_members"])
+        self.assertEqual(team_by_name[students[0]["name"]], team_by_name[students[9]["name"]])
+
+        result = matcher.run_workflow(students, team_size=5)
+        preferred_team = next(
+            team
+            for team in result["final_result"]["final_teams"]
+            if students[0]["name"] in {member["name"] for member in team["members"]}
+        )
+        self.assertTrue(preferred_team["preference_notes"])
+        self.assertEqual(students[0]["name"], preferred_team["leader"])
+
     def test_parallel_batch_merge_keeps_team_order(self):
         teams = [{"team_name": f"팀 {index}"} for index in range(1, 8)]
 
@@ -148,25 +247,15 @@ class HackathonLocalTest(unittest.TestCase):
         self.assertEqual(expected, [team["team_name"] for team in result])
         self.assertTrue(all(team["processed"] for team in result))
 
-    def test_local_api_run_contract_without_db(self):
+    def test_legacy_hackathon_matcher_contract_without_db(self):
         import api.main as api
-        import student_analysis.analysis_llm as analysis
 
-        saved = []
-        with patch.object(analysis, "get_analyze_stu", side_effect=lambda students: students), patch.object(
-            api,
-            "save_matching_result",
-            side_effect=lambda result, matching_type="CAPSTONE": saved.append(matching_type),
-        ):
-            response = api.run_hackathon_matching({
-                "students": build_students(10),
-                "teamSize": 5,
-            })
+        result = matcher.run_workflow(build_students(10), team_size=5)
+        response = api.build_hackathon_summary(result)
 
         self.assertEqual("HACKATHON", response["matching_type"])
         self.assertEqual(10, response["total_students"])
         self.assertEqual([5, 5], [team["total_people"] for team in response["teams"]])
-        self.assertEqual(["HACKATHON"], saved)
 
     @unittest.skipUnless(
         os.getenv("RUN_HACKATHON_LLM_TEST", "false").lower() == "true",

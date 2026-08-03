@@ -97,6 +97,33 @@ AI 서버는 FastAPI 기반으로 구성되어 있으며, 주요 엔드포인트
 - `POST /analysis/run`
 - `POST /matching/run`
 - `POST /matching/regenerate`
+- `POST /matching/hackathon/run/stream`
+- `POST /matching/hackathon/regenerate/stream`
+
+### 팀 매칭 SSE 스트림
+
+스트림 API는 기존 해커톤 호환 요청 본문을 그대로 사용하며, 실제 팀 생성과 재생성은 캡스톤 매칭 워크플로우로 처리합니다. 요청에는 백엔드 작업 ID를 `X-Matching-Job-Id` 헤더로 전달해야 합니다.
+
+응답의 `Content-Type`은 `text/event-stream`이며 이벤트는 다음 순서로 전달됩니다.
+
+1. `started`: 작업 시작과 생성/재생성 모드
+2. `progress`: `ANALYZING`, `MATCHING`, `VALIDATING`, `EXPLAINING`, `SAVING` 단계
+3. `team_preview`: 검증이 끝난 기본 팀 구성
+4. `team_update`: 강점과 약점 생성이 끝난 팀
+5. `team_ready`: 배정 이유까지 완성된 팀
+6. `completed`: 기존 JSON API와 같은 전체 최종 결과
+7. `error`: 실행 중 실패한 단계와 오류 메시지
+
+팀 이벤트의 `team_name`은 갱신 키이고 `version`은 `1`, `2`, `3` 순서입니다. 백엔드는 같은 `team_name`의 최신 버전을 저장하고 프론트에 중계합니다.
+
+```text
+id: 4
+event: team_preview
+data: {"job_id":"job-id","team_name":"팀 1","team_index":1,"total_teams":4,"version":1,"team":{...}}
+
+```
+
+AI 서버는 중간 이벤트를 별도로 저장하지 않습니다. 연결 종료 후 재접속과 중간 결과 복구는 백엔드가 `job_id`를 기준으로 담당하며, AI 작업은 스트림 소비자가 연결을 종료해도 최종 저장까지 계속 실행됩니다. 15초 동안 이벤트가 없으면 `: keep-alive` heartbeat가 전송됩니다.
 
 ## 기술 스택
 

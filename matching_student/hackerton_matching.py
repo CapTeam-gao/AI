@@ -22,6 +22,16 @@ from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
 
+from capteam_preferences import (
+    breaks_preference_constraints,
+    choose_preference_aware_leader,
+    ensure_preference_profile,
+    ensure_preference_profiles,
+    get_preferred_members,
+    preference_bonus,
+    team_preference_notes,
+)
+
 
 load_dotenv(override=False)
 
@@ -30,6 +40,8 @@ HIGH_SCORE = 4
 LOW_SCORE = 2
 MAX_ITERATIONS = 3
 EPSILON = 1e-9
+PREFERENCE_TECHNICAL_SPREAD_TOLERANCE = 2.0
+PREFERENCE_EXECUTION_SPREAD_TOLERANCE = 0.5
 
 SKILL_LEVEL_SCORE = {
     "상": 5,
@@ -206,7 +218,7 @@ def validate_and_normalize_students(students: List[Dict[str, Any]]) -> List[Dict
 
     if errors:
         raise ValueError("해커톤 성향 점수 검증 실패:\n- " + "\n- ".join(errors))
-    return normalized
+    return ensure_preference_profiles(normalized)
 
 
 def parse_stack_score(stack_score: Any) -> float:
@@ -248,6 +260,7 @@ def get_role_group(role: Any) -> str:
 
 
 def make_student_summary(student: Dict[str, Any]) -> Dict[str, Any]:
+    student = ensure_preference_profile(student)
     personality = student["personality_scores"]
     development = student["development_scores"]
     technical_score = get_technical_score(student)
@@ -260,12 +273,14 @@ def make_student_summary(student: Dict[str, Any]) -> Dict[str, Any]:
         "stack_score": student.get("stack_score", ""),
         "technical_score": technical_score,
         "execution_score": execution_score,
+        "score": round(technical_score + execution_score * 10, 2),
         "role": role,
         "role_group": get_role_group(role),
         "personality_scores": personality,
         "development_scores": development,
-        "preferred_members": student.get("preferred_members") or student.get("preferredMembers") or [],
-        "wants_leader": bool(student.get("wants_leader") or student.get("wantsLeader")),
+        "preferred_members": get_preferred_members(student),
+        "wants_leader": bool(student.get("wants_leader")),
+        "matching_preferences": student.get("matching_preferences", {}),
     }
 
 
@@ -299,10 +314,7 @@ def _role_counts(members: List[Dict[str, Any]]) -> Dict[str, int]:
 
 
 def _preferred_names(member: Dict[str, Any]) -> set[str]:
-    raw = member.get("preferred_members", [])
-    if isinstance(raw, str):
-        raw = re.split(r"[,\n/]", raw)
-    return {str(value).strip() for value in raw if str(value).strip()}
+    return {str(value).strip() for value in get_preferred_members(member) if str(value).strip()}
 
 
 def _team_averages(teams: List[Dict[str, Any]], field: str) -> List[float]:
@@ -324,8 +336,127 @@ def _hackathon_penalty(teams: List[Dict[str, Any]], expected_names: Optional[set
         penalty += 5 if members and not any(_trait(member, "presentation") >= HIGH_SCORE for member in members) else 0
         penalty += 5 if members and not any(_trait(member, "leadership") >= HIGH_SCORE for member in members) else 0
         member_names = {member["name"] for member in members}
-        penalty -= sum(len(_preferred_names(member) & member_names) for member in members) * 0.1
+        penalty -= sum(len(_preferred_names(member) & member_names) for member in members) * 1.0
     return round(penalty, 3)
+
+
+def _team_index_by_member(teams: List[Dict[str, Any]]) -> Dict[str, int]:
+    return {
+        member["name"]: team_index
+        for team_index, team in enumerate(teams)
+        for member in team.get("members", [])
+    }
+
+
+def _unmet_preference_count(teams: List[Dict[str, Any]], expected_names: Optional[set[str]] = None) -> int:
+    expected_names = expected_names or {member["name"] for member in _flatten_members(teams)}
+    team_by_name = _team_index_by_member(teams)
+    unmet = 0
+    for member in _flatten_members(teams):
+        member_team = team_by_name.get(member["name"])
+        for preferred_name in _preferred_names(member):
+            if preferred_name in expected_names and team_by_name.get(preferred_name) != member_team:
+                unmet += 1
+    return unmet
+
+
+def _count_preference_hits(teams: List[Dict[str, Any]]) -> int:
+    team_by_name = _team_index_by_member(teams)
+    return sum(
+        1
+        for member in _flatten_members(teams)
+        for preferred_name in get_preferred_members(member)
+        if team_by_name.get(member.get("name")) == team_by_name.get(preferred_name)
+    )
+
+
+def _count_role_diversity(teams: List[Dict[str, Any]]) -> int:
+    return sum(
+        len({
+            member.get("role_group")
+            for member in team.get("members", [])
+            if member.get("role_group")
+        })
+        for team in teams
+    )
+
+
+def _get_team_score_gap(teams: List[Dict[str, Any]]) -> float:
+    scores = [
+        sum(float(member.get("score", 0) or 0) for member in team.get("members", []))
+        for team in teams
+    ]
+    return round(max(scores) - min(scores), 2) if scores else 0.0
+
+
+def _get_preference_layout_score(teams: List[Dict[str, Any]]) -> tuple:
+    return (
+        _count_preference_hits(teams),
+        _count_role_diversity(teams),
+        -_get_team_score_gap(teams),
+    )
+
+
+def _keeps_preference_team_balance(
+    candidate_teams: List[Dict[str, Any]],
+    baseline_score_gap: float,
+    min_role_diversity: int,
+) -> bool:
+    score_gap = _get_team_score_gap(candidate_teams)
+    role_diversity = _count_role_diversity(candidate_teams)
+    allowed_score_gap = max(baseline_score_gap + 5, baseline_score_gap * 1.15)
+    return role_diversity >= min_role_diversity and score_gap <= allowed_score_gap
+
+
+def _optimize_teams_for_preferences(teams: List[Dict[str, Any]], max_passes: int = 20) -> List[Dict[str, Any]]:
+    """Capstone-style preference swap optimizer adapted to hackathon scores."""
+    if not teams or not any(get_preferred_members(member) for member in _flatten_members(teams)):
+        return teams
+
+    optimized = copy.deepcopy(teams)
+    current_score = _get_preference_layout_score(optimized)
+    baseline_score_gap = _get_team_score_gap(optimized)
+    min_role_diversity = _count_role_diversity(optimized)
+
+    for _ in range(max_passes):
+        best_score = current_score
+        best_swap = None
+
+        for first_team_index in range(len(optimized)):
+            for second_team_index in range(first_team_index + 1, len(optimized)):
+                first_members = optimized[first_team_index].get("members", [])
+                second_members = optimized[second_team_index].get("members", [])
+
+                for first_member_index in range(len(first_members)):
+                    for second_member_index in range(len(second_members)):
+                        candidate = copy.deepcopy(optimized)
+                        candidate[first_team_index]["members"][first_member_index], candidate[second_team_index]["members"][second_member_index] = (
+                            candidate[second_team_index]["members"][second_member_index],
+                            candidate[first_team_index]["members"][first_member_index],
+                        )
+                        if not _keeps_preference_team_balance(candidate, baseline_score_gap, min_role_diversity):
+                            continue
+                        candidate_score = _get_preference_layout_score(candidate)
+                        if candidate_score > best_score:
+                            best_score = candidate_score
+                            best_swap = (
+                                first_team_index,
+                                second_team_index,
+                                first_member_index,
+                                second_member_index,
+                            )
+
+        if best_swap is None:
+            break
+
+        first_team_index, second_team_index, first_member_index, second_member_index = best_swap
+        optimized[first_team_index]["members"][first_member_index], optimized[second_team_index]["members"][second_member_index] = (
+            optimized[second_team_index]["members"][second_member_index],
+            optimized[first_team_index]["members"][first_member_index],
+        )
+        current_score = best_score
+
+    return optimized
 
 
 def _candidate_score(teams: List[Dict[str, Any]], expected_names: set[str]) -> List[float]:
@@ -335,6 +466,7 @@ def _candidate_score(teams: List[Dict[str, Any]], expected_names: set[str]) -> L
         float(structural),
         _spread(_team_averages(teams, "technical_score")),
         _spread(_team_averages(teams, "execution_score")),
+        float(_unmet_preference_count(teams, expected_names)),
         _hackathon_penalty(teams, expected_names),
     ]
 
@@ -347,15 +479,17 @@ def _placement_key(teams: List[Dict[str, Any]], team_index: int, student: Dict[s
     low_stamina = sum(_trait(member, "staminaFocus") <= LOW_SCORE for member in projected)
     has_presentation = any(_trait(member, "presentation") >= HIGH_SCORE for member in team["members"])
     has_leader = any(_trait(member, "leadership") >= HIGH_SCORE for member in team["members"])
-    preference_hits = len(_preferred_names(student) & {member["name"] for member in team["members"]})
+    safe_preference_bonus = preference_bonus(student, team["members"])
+    if safe_preference_bonus and breaks_preference_constraints(projected):
+        safe_preference_bonus = 0
     return (
+        -safe_preference_bonus,
         abs(_average(projected, "technical_score") - target_technical),
         abs(_average(projected, "execution_score") - target_execution),
         role_count,
         max(0, low_pressure - 1) + max(0, low_stamina - 1),
         0 if _trait(student, "presentation") >= HIGH_SCORE and not has_presentation else 1,
         0 if _trait(student, "leadership") >= HIGH_SCORE and not has_leader else 1,
-        -preference_hits,
         len(team["members"]),
         team_index,
     )
@@ -389,6 +523,99 @@ def _optimize_swaps(teams: List[Dict[str, Any]], expected_names: set[str], max_p
     return optimized
 
 
+def _optimize_preference_swaps(teams: List[Dict[str, Any]], expected_names: set[str], max_passes: int = 8) -> List[Dict[str, Any]]:
+    optimized = copy.deepcopy(teams)
+    current_unmet = _unmet_preference_count(optimized, expected_names)
+    current_technical = _spread(_team_averages(optimized, "technical_score"))
+    current_execution = _spread(_team_averages(optimized, "execution_score"))
+    for _ in range(max_passes):
+        best_candidate = None
+        best_key = None
+        for left in range(len(optimized)):
+            for right in range(left + 1, len(optimized)):
+                for left_member in range(len(optimized[left]["members"])):
+                    for right_member in range(len(optimized[right]["members"])):
+                        candidate = copy.deepcopy(optimized)
+                        candidate[left]["members"][left_member], candidate[right]["members"][right_member] = (
+                            candidate[right]["members"][right_member], candidate[left]["members"][left_member]
+                        )
+                        unmet = _unmet_preference_count(candidate, expected_names)
+                        technical = _spread(_team_averages(candidate, "technical_score"))
+                        execution = _spread(_team_averages(candidate, "execution_score"))
+                        if unmet >= current_unmet:
+                            continue
+                        if technical > current_technical + PREFERENCE_TECHNICAL_SPREAD_TOLERANCE:
+                            continue
+                        if execution > current_execution + PREFERENCE_EXECUTION_SPREAD_TOLERANCE:
+                            continue
+                        key = (
+                            unmet,
+                            technical,
+                            execution,
+                            _hackathon_penalty(candidate, expected_names),
+                        )
+                        if best_key is None or key < best_key:
+                            best_key = key
+                            best_candidate = candidate
+        if best_candidate is None:
+            break
+        optimized = best_candidate
+        current_unmet = _unmet_preference_count(optimized, expected_names)
+        current_technical = _spread(_team_averages(optimized, "technical_score"))
+        current_execution = _spread(_team_averages(optimized, "execution_score"))
+    return optimized
+
+
+def _choose_preference_candidate_for_team(team: Dict[str, Any], candidates: List[Dict[str, Any]]) -> Dict[str, Any]:
+    members = team.get("members", [])
+    role_counts = _role_counts(members)
+
+    def candidate_key(candidate: Dict[str, Any]) -> tuple:
+        projected = members + [candidate]
+        bonus = preference_bonus(candidate, members)
+        if bonus and breaks_preference_constraints(projected):
+            bonus = 0
+        return (
+            -bonus,
+            role_counts.get(candidate["role_group"], 0),
+            -candidate["score"],
+            candidate["name"],
+        )
+
+    return min(candidates, key=candidate_key)
+
+
+def _create_preference_seeded_teams(
+    summaries: List[Dict[str, Any]],
+    capacities: List[int],
+) -> List[Dict[str, Any]]:
+    teams = [
+        {"team_name": f"팀 {index + 1}", "capacity": capacity, "members": []}
+        for index, capacity in enumerate(capacities)
+    ]
+    unassigned = sorted(
+        summaries,
+        key=lambda member: (
+            bool(get_preferred_members(member)),
+            member["technical_score"],
+            member["execution_score"],
+            member["name"],
+        ),
+        reverse=True,
+    )
+
+    for team in teams:
+        while unassigned and len(team["members"]) < team["capacity"]:
+            if not team["members"]:
+                candidate = unassigned.pop(0)
+            else:
+                candidate = _choose_preference_candidate_for_team(team, unassigned)
+                unassigned.remove(candidate)
+            team["members"].append(candidate)
+
+    return teams
+
+
 def create_initial_teams(students: List[Dict[str, Any]], team_size: int = TEAM_SIZE) -> List[Dict[str, Any]]:
     summaries = [make_student_summary(student) for student in students]
     capacities = build_team_capacities(len(summaries), team_size)
@@ -399,28 +626,35 @@ def create_initial_teams(students: List[Dict[str, Any]], team_size: int = TEAM_S
     target_technical = mean(member["technical_score"] for member in summaries)
     target_execution = mean(member["execution_score"] for member in summaries)
 
-    # Serpentine-like greedy placement: strongest developers are considered first,
-    # while the projected team averages remain the first two selection criteria.
-    ordered = sorted(
-        summaries,
-        key=lambda member: (
-            member["technical_score"],
-            member["execution_score"],
-            _trait(member, "presentation"),
-            _trait(member, "leadership"),
-            member["name"],
-        ),
-        reverse=True,
-    )
-    for student in ordered:
-        available = [index for index, team in enumerate(teams) if len(team["members"]) < team["capacity"]]
-        selected = min(
-            available,
-            key=lambda index: _placement_key(teams, index, student, target_technical, target_execution),
+    has_preferences = any(get_preferred_members(student) for student in summaries)
+    if has_preferences:
+        teams = _create_preference_seeded_teams(summaries, capacities)
+    else:
+        # Serpentine-like greedy placement: strongest developers are considered first,
+        # while the projected team averages remain the first two selection criteria.
+        ordered = sorted(
+            summaries,
+            key=lambda member: (
+                member["technical_score"],
+                member["execution_score"],
+                _trait(member, "presentation"),
+                _trait(member, "leadership"),
+                member["name"],
+            ),
+            reverse=True,
         )
-        teams[selected]["members"].append(student)
+        for student in ordered:
+            available = [index for index, team in enumerate(teams) if len(team["members"]) < team["capacity"]]
+            selected = min(
+                available,
+                key=lambda index: _placement_key(teams, index, student, target_technical, target_execution),
+            )
+            teams[selected]["members"].append(student)
 
-    return _optimize_swaps(teams, {student["name"] for student in summaries})
+    expected_names = {student["name"] for student in summaries}
+    balanced = _optimize_swaps(teams, expected_names)
+    preference_balanced = _optimize_preference_swaps(balanced, expected_names)
+    return _optimize_teams_for_preferences(preference_balanced)
 
 
 def _team_warnings(team: Dict[str, Any]) -> List[str]:
@@ -550,6 +784,91 @@ def _rebuild_llm_teams(raw: Dict[str, Any], base_teams: List[Dict[str, Any]]) ->
     return rebuilt
 
 
+def _flatten_members(teams: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [member for team in teams for member in team.get("members", [])]
+
+
+def _prompt_requests_game_grouping(prompt: str) -> bool:
+    text = str(prompt or "").lower()
+    has_game = any(keyword in text for keyword in ("game", "게임", "유니티", "unity", "언리얼", "unreal"))
+    has_grouping = any(
+        keyword in text
+        for keyword in (
+            "붙",
+            "묶",
+            "같은 팀",
+            "한 팀",
+            "모아",
+            "모으",
+            "5명씩",
+            "five",
+            "same team",
+            "together",
+            "group",
+        )
+    )
+    return has_game and has_grouping
+
+
+def _regroup_role_by_capacity(teams: List[Dict[str, Any]], role_group: str) -> List[Dict[str, Any]]:
+    """Place requested role members together in team-capacity sized groups."""
+    members = _flatten_members(teams)
+    target_members = [member for member in members if member.get("role_group") == role_group]
+    if not target_members:
+        return teams
+
+    other_members = [member for member in members if member.get("role_group") != role_group]
+    target_team_names = {
+        team["team_name"]
+        for team in sorted(
+            teams,
+            key=lambda team: (
+                -sum(member.get("role_group") == role_group for member in team.get("members", [])),
+                team["team_name"],
+            ),
+        )
+        if any(member.get("role_group") == role_group for member in team.get("members", []))
+    }
+    ordered_teams = sorted(
+        teams,
+        key=lambda team: (
+            0 if team["team_name"] in target_team_names else 1,
+            -team["capacity"],
+            team["team_name"],
+        ),
+    )
+
+    rebuilt_by_name: Dict[str, Dict[str, Any]] = {}
+    remaining_targets = list(target_members)
+    for team in ordered_teams:
+        capacity = team["capacity"]
+        assigned = remaining_targets[:capacity]
+        remaining_targets = remaining_targets[capacity:]
+        rebuilt_by_name[team["team_name"]] = {
+            "team_name": team["team_name"],
+            "capacity": capacity,
+            "members": assigned,
+        }
+        if not remaining_targets:
+            break
+
+    for team in teams:
+        rebuilt_by_name.setdefault(
+            team["team_name"],
+            {"team_name": team["team_name"], "capacity": team["capacity"], "members": []},
+        )
+
+    other_index = 0
+    for team in teams:
+        rebuilt = rebuilt_by_name[team["team_name"]]
+        remaining_capacity = rebuilt["capacity"] - len(rebuilt["members"])
+        if remaining_capacity > 0:
+            rebuilt["members"].extend(other_members[other_index:other_index + remaining_capacity])
+            other_index += remaining_capacity
+
+    return [rebuilt_by_name[team["team_name"]] for team in teams]
+
+
 def create_team_node(state: MatchingState) -> Dict[str, Any]:
     teams = create_initial_teams(state["analyzed_students"], state.get("team_size", TEAM_SIZE))
     baseline = validate_teams(teams, state["analyzed_students"])
@@ -624,15 +943,18 @@ def _choose_member(members: List[Dict[str, Any]], key: str, extra: str = "techni
 
 def _enrich_team(team: Dict[str, Any]) -> Dict[str, Any]:
     members = team["members"]
-    leader = max(
-        members,
-        key=lambda member: (
-            _trait(member, "leadership"),
-            _trait(member, "communication"),
-            member["execution_score"],
-            member["name"],
-        ),
-    )
+    if any(member.get("wants_leader") for member in members):
+        leader = choose_preference_aware_leader(members)
+    else:
+        leader = max(
+            members,
+            key=lambda member: (
+                _trait(member, "leadership"),
+                _trait(member, "communication"),
+                member["execution_score"],
+                member["name"],
+            ),
+        )
     presenter = _choose_member(members, "presentation")
     planner = _choose_member(members, "ideaPlanning")
     flexible = _choose_member(members, "roleFlexibility")
@@ -658,6 +980,7 @@ def _enrich_team(team: Dict[str, Any]) -> Dict[str, Any]:
         "personality_averages": personality_averages,
         "development_averages": development_averages,
         "assignment_reasons": reasons,
+        "preference_notes": team_preference_notes(members),
         "warnings": _team_warnings(team),
     }
     return _apply_fallback_explanation(enriched)
@@ -1011,10 +1334,14 @@ def _request_user_regeneration(
     prompt_text: str,
 ) -> Dict[str, Any]:
     prompt = ChatPromptTemplate.from_messages([
-        ("system", """당신은 확정된 해커톤 팀의 재생성 담당자다. 사용자의 요청을 가능한 범위에서 반영하되,
-학생 추가·누락·중복, 팀 수 변경, 팀별 인원 변경은 금지한다. 팀별 technical_score와 execution_score 편차를
-현재 결과보다 악화시키지 않는다. presentation/leadership 후보 분산, 역할 균형, 저압박·저집중 학생 분산도
-가능한 한 유지한다. 요청이 이 제약과 충돌하면 팀을 바꾸지 않는다."""),
+        ("system", """당신은 확정된 해커톤 팀의 재생성 담당자다. 사용자의 요청을 가능한 범위에서 최대한 반영하라.
+        presentation/leadership 후보 분산, 역할 균형, 저압박·저집중 학생 분산도
+        가능한 한 유지한다.
+
+예외: 사용자가 game/게임/유니티/언리얼 역할 학생들을 같은 팀 또는 5명씩 묶으라고 명시하면,
+학생 추가·누락·중복과 팀별 인원만 지키면서 해당 game 역할군 묶기 요청을 우선 반영한다.
+game 역할군 전체 인원이 한 팀 정원 이하이면 반드시 전원을 같은 팀에 배치하고,
+정원을 넘으면 정원 단위로 최대한 5명씩 붙여 배치한다."""),
         ("human", "현재 팀:\n{teams}\n\n사용자 재생성 요청:\n{request}"),
     ])
     chain = prompt | _llm().with_structured_output(LLMMatchingResult)
@@ -1049,8 +1376,15 @@ def run_regenerate_workflow(
     except Exception as error:
         raise RuntimeError(f"해커톤 팀 재생성 LLM 호출 실패: {type(error).__name__}: {error}") from error
 
+    game_grouping_requested = _prompt_requests_game_grouping(prompt)
     candidate = _rebuild_llm_teams(raw, base_teams)
-    candidate_validation = validate_teams(candidate, normalized_students, baseline_metrics)
+    if game_grouping_requested:
+        pre_group_validation = validate_teams(candidate, normalized_students)
+        grouping_base = candidate if pre_group_validation["structural_valid"] else base_teams
+        candidate = _regroup_role_by_capacity(grouping_base, "game")
+        candidate_validation = validate_teams(candidate, normalized_students)
+    else:
+        candidate_validation = validate_teams(candidate, normalized_students, baseline_metrics)
     accepted = candidate_validation["is_valid"]
     selected = candidate if accepted else base_teams
     final_validation = candidate_validation if accepted else baseline
