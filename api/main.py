@@ -2,11 +2,14 @@
 #팀 재생성 프롬포트 넣어서 팀 재생성 누르면 가능하도록 최종 팀에서 재생성 프롬포트넣어서 llm이 수정하도록 하기.
 import json
 import re
+from queue import Empty, Queue
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from threading import Thread
+from typing import Any, Callable, Dict, List, Optional
 from dotenv import load_dotenv
 
-from fastapi import Body, FastAPI, HTTPException
+from fastapi import Body, FastAPI, Header, HTTPException
+from fastapi.responses import StreamingResponse
 
 from capteam_db import fetch_matching_result, save_matching_result
 from capteam_traits import (
@@ -23,6 +26,9 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 MATCHING_OUTPUT_PATH = BASE_DIR / "data/student_analysis_data/matching_output.json"
 
 app = FastAPI(title="CapTeam Matching API")
+
+SSE_HEARTBEAT_SECONDS = 15
+STREAM_END = object()
 
 
 # data에서 여러 후보 key 중 처음 존재하는 값을 반환한다.
@@ -641,6 +647,214 @@ def build_team_summary(matching_output: Dict[str, Any] = None) -> Dict[str, Any]
     }
 
 
+def normalize_stream_job_id(job_id: str) -> str:
+    normalized = str(job_id or "").strip()
+    if not normalized:
+        raise HTTPException(status_code=400, detail="X-Matching-Job-Id 헤더가 필요합니다.")
+    return normalized
+
+
+def parse_stream_students(payload: Any, required: bool) -> Optional[List[Dict[str, Any]]]:
+    if isinstance(payload, list):
+        students = payload
+    elif isinstance(payload, dict):
+        students = payload.get("students")
+    elif payload is None and not required:
+        return None
+    else:
+        raise HTTPException(status_code=400, detail="students 목록이 필요합니다.")
+
+    if students is None and not required:
+        return None
+    if not isinstance(students, list) or not students:
+        raise HTTPException(status_code=400, detail="students 목록이 필요합니다.")
+    return normalize_request_students(students)
+
+
+def format_sse_event(event_id: int, event_type: str, data: Dict[str, Any]) -> str:
+    payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+    return f"id: {event_id}\nevent: {event_type}\ndata: {payload}\n\n"
+
+
+def build_stream_team_summary(
+    team: Dict[str, Any],
+    analyzed_students: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    summary = build_team_summary({
+        "analyzed_students": analyzed_students,
+        "final_result": {"final_teams": [team]},
+    })
+    return summary["teams"][0] if summary.get("teams") else {}
+
+
+def create_team_progress_callback(
+    analyzed_students: List[Dict[str, Any]],
+    emit: Callable[[str, Dict[str, Any]], None],
+    set_stage: Callable[[str], None],
+):
+    versions = {"team_preview": 1, "team_update": 2, "team_ready": 3}
+    state = {
+        "team_index_by_name": {},
+        "total_teams": 0,
+        "seen": set(),
+        "validation_reported": False,
+        "explanation_reported": False,
+    }
+
+    def callback(event_type: str, teams: List[Dict[str, Any]]) -> None:
+        if event_type not in versions or not teams:
+            return
+
+        if event_type == "team_preview" and not state["validation_reported"]:
+            set_stage("VALIDATING")
+            state["validation_reported"] = True
+            state["total_teams"] = len(teams)
+            state["team_index_by_name"] = {
+                team.get("team_name"): index
+                for index, team in enumerate(teams, start=1)
+            }
+
+        if not state["team_index_by_name"]:
+            state["total_teams"] = len(teams)
+            state["team_index_by_name"] = {
+                team.get("team_name"): index
+                for index, team in enumerate(teams, start=1)
+            }
+
+        for team in teams:
+            team_name = team.get("team_name") or ""
+            event_key = (event_type, team_name)
+            if event_key in state["seen"]:
+                continue
+            emit(event_type, {
+                "team_name": team_name,
+                "team_index": state["team_index_by_name"].get(team_name, 0),
+                "total_teams": state["total_teams"],
+                "version": versions[event_type],
+                "team": build_stream_team_summary(team, analyzed_students),
+            })
+            state["seen"].add(event_key)
+
+        if event_type == "team_preview" and not state["explanation_reported"]:
+            set_stage("EXPLAINING")
+            state["explanation_reported"] = True
+
+    return callback
+
+
+def run_capstone_stream_job(
+    mode: str,
+    request_students: Optional[List[Dict[str, Any]]],
+    stored_students: Optional[List[Dict[str, Any]]],
+    current_teams: Optional[List[Dict[str, Any]]],
+    prompt: str,
+    emit: Callable[[str, Dict[str, Any]], None],
+    set_stage: Callable[[str], None],
+) -> None:
+    from student_analysis.analysis_llm import get_analyze_stu
+    from matching_student.workflow_matching_student import (
+        build_public_workflow_result,
+        run_regenerate_workflow,
+        run_workflow,
+    )
+
+    set_stage("ANALYZING")
+    analyzed_students = (
+        get_analyze_stu(request_students)
+        if request_students is not None
+        else list(stored_students or [])
+    )
+    if not analyzed_students:
+        raise ValueError("팀 매칭에 사용할 학생 분석 결과가 없습니다.")
+
+    progress_callback = create_team_progress_callback(analyzed_students, emit, set_stage)
+    set_stage("MATCHING")
+    if mode == "REGENERATE":
+        result = run_regenerate_workflow(
+            prompt=prompt,
+            current_teams=current_teams,
+            analyzed_students=analyzed_students,
+            persist_result=False,
+            progress_callback=progress_callback,
+        )
+    else:
+        result = run_workflow(
+            force_rematch=True,
+            analyzed_students=analyzed_students,
+            persist_result=False,
+            progress_callback=progress_callback,
+        )
+
+    final_teams = get_final_teams(get_final_result(result))
+    for event_type in ("team_preview", "team_update", "team_ready"):
+        progress_callback(event_type, final_teams)
+
+    set_stage("SAVING")
+    save_matching_result(build_public_workflow_result(result), matching_type="HACKATHON")
+    emit("completed", {"result": build_team_summary(result)})
+
+
+def create_matching_stream_response(
+    job_id: str,
+    mode: str,
+    worker: Callable[[Callable[[str, Dict[str, Any]], None], Callable[[str], None]], None],
+) -> StreamingResponse:
+    event_queue = Queue()
+    current_stage = {"value": "STARTING"}
+
+    def emit(event_type: str, data: Dict[str, Any]) -> None:
+        event_queue.put({
+            "event": event_type,
+            "data": {"job_id": job_id, **data},
+        })
+
+    def set_stage(stage: str) -> None:
+        current_stage["value"] = stage
+        emit("progress", {"stage": stage})
+
+    def run_worker() -> None:
+        try:
+            worker(emit, set_stage)
+        except Exception as error:
+            print(f"팀 매칭 스트림 실패: {type(error).__name__}: {error}")
+            emit("error", {
+                "stage": current_stage["value"],
+                "message": str(error) or "팀 매칭 스트림 처리 중 오류가 발생했습니다.",
+                "retryable": False,
+            })
+        finally:
+            event_queue.put(STREAM_END)
+
+    event_queue.put({
+        "event": "started",
+        "data": {"job_id": job_id, "mode": mode},
+    })
+    Thread(target=run_worker, name=f"matching-stream-{job_id}", daemon=True).start()
+
+    def event_generator():
+        event_id = 1
+        while True:
+            try:
+                item = event_queue.get(timeout=SSE_HEARTBEAT_SECONDS)
+            except Empty:
+                yield ": keep-alive\n\n"
+                continue
+            if item is STREAM_END:
+                return
+            yield format_sse_event(event_id, item["event"], item["data"])
+            event_id += 1
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 def build_hackathon_summary(matching_output: Dict[str, Any]) -> Dict[str, Any]:
     final_result = matching_output.get("final_result") or matching_output
     final_teams = final_result.get("final_teams", [])
@@ -699,7 +913,7 @@ def teams_summary(matching_type: str = "CAPSTONE"):
     normalized_type = str(matching_type or "CAPSTONE").strip().upper()
     result = load_matching_output(normalized_type)
     if normalized_type == "HACKATHON":
-        return build_hackathon_summary(result)
+        return build_team_summary(result)
     return build_team_summary(result)
 
 
@@ -748,47 +962,67 @@ def run_matching(payload: Any = Body(default=None)):
 
 
 @app.post("/matching/hackathon/run")
-# 새 해커톤 10개 성향 점수를 직접 받아 팀 생성, 검증, 설명 생성을 한 번에 실행한다.
-# 기존 캡스톤 분석/매칭/저장 경로와 분리해 두 결과가 서로 덮어쓰이지 않게 한다.
+# 백엔드 호환을 위해 해커톤 URL을 유지하되 캡스톤 기준으로 팀을 생성한다.
+# 결과는 HACKATHON 저장 영역에 따로 보관해 일반 CAPSTONE 캐시를 덮어쓰지 않는다.
 def run_hackathon_matching(payload: Any = Body(default=None)):
     from student_analysis.analysis_llm import get_analyze_stu
-    from matching_student.hackerton_matching import run_workflow as run_hackathon_workflow
+    from matching_student.workflow_matching_student import build_public_workflow_result, run_workflow
 
     if isinstance(payload, list):
         students = payload
-        team_size = 5
     elif isinstance(payload, dict):
         students = payload.get("students")
-        team_size = payload.get("team_size") or payload.get("teamSize") or 5
     else:
         raise HTTPException(status_code=400, detail="students 목록이 필요합니다.")
 
     try:
-        team_size = int(team_size)
-    except (TypeError, ValueError) as error:
-        raise HTTPException(status_code=400, detail="team_size는 1 이상의 정수여야 합니다.") from error
-    if team_size < 1:
-        raise HTTPException(status_code=400, detail="team_size는 1 이상의 정수여야 합니다.")
-
-    try:
         request_students = normalize_request_students(students)
         analyzed_students = get_analyze_stu(request_students)
-        result = run_hackathon_workflow(analyzed_students, team_size=team_size)
+        result = run_workflow(
+            force_rematch=True,
+            analyzed_students=analyzed_students,
+            persist_result=False,
+        )
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
-    save_matching_result(result, matching_type="HACKATHON")
-    return build_hackathon_summary(result)
+    save_matching_result(build_public_workflow_result(result), matching_type="HACKATHON")
+    return build_team_summary(result)
+
+
+@app.post("/matching/hackathon/run/stream")
+def stream_hackathon_matching(
+    payload: Any = Body(default=None),
+    matching_job_id: str = Header(..., alias="X-Matching-Job-Id"),
+):
+    job_id = normalize_stream_job_id(matching_job_id)
+    request_students = parse_stream_students(payload, required=True)
+    return create_matching_stream_response(
+        job_id=job_id,
+        mode="INITIAL",
+        worker=lambda emit, set_stage: run_capstone_stream_job(
+            mode="INITIAL",
+            request_students=request_students,
+            stored_students=None,
+            current_teams=None,
+            prompt="",
+            emit=emit,
+            set_stage=set_stage,
+        ),
+    )
 
 
 @app.get("/matching/hackathon/summary")
 def hackathon_matching_summary():
-    return build_hackathon_summary(load_matching_output("HACKATHON"))
+    return build_team_summary(load_matching_output("HACKATHON"))
 
 
 @app.post("/matching/hackathon/regenerate")
 def regenerate_hackathon_matching(payload: Optional[Dict[str, Any]] = Body(default=None)):
     from student_analysis.analysis_llm import get_analyze_stu
-    from matching_student.hackerton_matching import run_regenerate_workflow
+    from matching_student.workflow_matching_student import (
+        build_public_workflow_result,
+        run_regenerate_workflow,
+    )
 
     payload = payload or {}
     prompt = str(
@@ -816,14 +1050,56 @@ def regenerate_hackathon_matching(payload: Optional[Dict[str, Any]] = Body(defau
             prompt=prompt,
             current_teams=current_teams,
             analyzed_students=analyzed_students,
+            persist_result=False,
         )
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     except RuntimeError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
 
-    save_matching_result(result, matching_type="HACKATHON")
-    return build_hackathon_summary(result)
+    save_matching_result(build_public_workflow_result(result), matching_type="HACKATHON")
+    return build_team_summary(result)
+
+
+@app.post("/matching/hackathon/regenerate/stream")
+def stream_regenerate_hackathon_matching(
+    payload: Optional[Dict[str, Any]] = Body(default=None),
+    matching_job_id: str = Header(..., alias="X-Matching-Job-Id"),
+):
+    job_id = normalize_stream_job_id(matching_job_id)
+    payload = payload or {}
+    prompt = str(
+        payload.get("prompt")
+        or payload.get("regeneration_prompt")
+        or payload.get("regenerationPrompt")
+        or ""
+    ).strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="재생성 프롬프트가 비어 있습니다.")
+
+    saved_result = load_matching_output("HACKATHON")
+    request_students = parse_stream_students(payload, required=False)
+    current_teams = (
+        payload.get("current_teams")
+        or payload.get("currentTeams")
+        or (saved_result.get("final_result") or {}).get("final_teams")
+    )
+    if not current_teams:
+        raise HTTPException(status_code=400, detail="재생성할 현재 팀이 없습니다.")
+
+    return create_matching_stream_response(
+        job_id=job_id,
+        mode="REGENERATE",
+        worker=lambda emit, set_stage: run_capstone_stream_job(
+            mode="REGENERATE",
+            request_students=request_students,
+            stored_students=saved_result.get("analyzed_students", []),
+            current_teams=current_teams,
+            prompt=prompt,
+            emit=emit,
+            set_stage=set_stage,
+        ),
+    )
 
 
 @app.post("/matching/regenerate")

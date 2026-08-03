@@ -1,4 +1,4 @@
-from typing import Any,List,TypedDict,Dict,Optional
+from typing import Any, Callable, List, TypedDict, Dict, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import copy
 import os
@@ -80,6 +80,7 @@ class MatchingState(TypedDict):
     last_adjustment_improved: bool #직전 LLM 수정안이 이전 최고 후보보다 개선됐는지 여부
     regeneration_mode: bool #사용자 프롬프트 기반 재생성 경로인지 여부
     regeneration_base_teams: List[Dict[str, Any]] #재생성 전 팀을 보존해 불필요한 전체 재배치를 막는 기준
+    progress_callback: Any #스트림 API가 팀 생성 진행 상황을 전달받는 선택적 콜백
 #team으로 알고리즘으로 team상태 저장하고
 #llm_result로 llm이 제안한 팀 상태 저장하고
 #검증할때 실패하면 다시 알고리즘 보고 할수있도록 알고리즘은 그대로 두고 llm_result만 계속 덮어 씌어지면서 수정
@@ -2492,6 +2493,7 @@ def run_parallel_team_batches(
     error_fields: Optional[Dict[str, Any]] = None,
     error_key: str = "generation_error",
     task_label: str = "팀 설명",
+    on_batch_complete: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
 ):
     teams = get_candidate_teams(final_teams)
     if not teams:
@@ -2523,6 +2525,14 @@ def run_parallel_team_batches(
                     }
                     for team in batch
                 ]
+            if on_batch_complete and results[index]:
+                try:
+                    on_batch_complete(copy.deepcopy(results[index]))
+                except Exception as callback_error:
+                    print(
+                        f"{task_label} 스트림 콜백 실패: "
+                        f"{type(callback_error).__name__}: {callback_error}"
+                    )
 
     fixed_teams = []
     for batch_result in results:
@@ -2573,7 +2583,11 @@ def parallelization_strength_weakness_batch(
     return fixed_teams
 
 
-def run_parallel_strength_weakness(final_teams, analyzed_students):
+def run_parallel_strength_weakness(
+    final_teams,
+    analyzed_students,
+    on_batch_complete: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
+):
     return run_parallel_team_batches(
         final_teams=final_teams,
         analyzed_students=analyzed_students,
@@ -2588,6 +2602,7 @@ def run_parallel_strength_weakness(final_teams, analyzed_students):
         },
         error_key="analysis_generation_error",
         task_label="강점/약점",
+        on_batch_complete=on_batch_complete,
     )
 
 
@@ -2743,7 +2758,11 @@ def parallelization_reason_cards_batch(
     return fixed_teams
 
 
-def run_parallel_reason_cards(final_teams, analyzed_students):
+def run_parallel_reason_cards(
+    final_teams,
+    analyzed_students,
+    on_batch_complete: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
+):
     return run_parallel_team_batches(
         final_teams=final_teams,
         analyzed_students=analyzed_students,
@@ -2758,6 +2777,7 @@ def run_parallel_reason_cards(final_teams, analyzed_students):
         },
         error_key="reason_generation_error",
         task_label="배정 이유",
+        on_batch_complete=on_batch_complete,
     )
 
 
@@ -2802,6 +2822,20 @@ def generate_final_reason_cards(final_teams, analyzed_students):
 
 
 
+def emit_matching_progress(
+    state: MatchingState,
+    event_type: str,
+    teams: List[Dict[str, Any]],
+) -> None:
+    callback = state.get("progress_callback")
+    if not callable(callback) or not teams:
+        return
+    try:
+        callback(event_type, copy.deepcopy(teams))
+    except Exception as error:
+        print(f"팀 매칭 스트림 콜백 실패: {type(error).__name__}: {error}")
+
+
 #최종 설명노드
 #검증된 매칭된 팀 final_result출력
 # LangGraph 마지막 단계에서 최종 매칭 결과를 확정한다.
@@ -2844,8 +2878,17 @@ def finalize_node(state: MatchingState) -> Dict[str, Any]:
         team_evaluations = state.get("team_evaluations", [])
 
     enriched_teams = enrich_final_teams(candidate_teams, analyzed_students)
-    analyzed_teams = run_parallel_strength_weakness(enriched_teams, analyzed_students)
-    final_teams = run_parallel_reason_cards(analyzed_teams, analyzed_students)
+    emit_matching_progress(state, "team_preview", enriched_teams)
+    analyzed_teams = run_parallel_strength_weakness(
+        enriched_teams,
+        analyzed_students,
+        on_batch_complete=lambda teams: emit_matching_progress(state, "team_update", teams),
+    )
+    final_teams = run_parallel_reason_cards(
+        analyzed_teams,
+        analyzed_students,
+        on_batch_complete=lambda teams: emit_matching_progress(state, "team_ready", teams),
+    )
     llm_result = state.get("llm_result", {})
 
     final_result = {
@@ -3115,6 +3158,8 @@ def run_regenerate_workflow(
     prompt: str,
     current_teams: Optional[List[Dict[str, Any]]] = None,
     analyzed_students: Optional[List[Dict[str, Any]]] = None,
+    persist_result: bool = True,
+    progress_callback: Optional[Callable[[str, List[Dict[str, Any]]], None]] = None,
 ):
     prompt = (prompt or "").strip()
     if not prompt:
@@ -3125,6 +3170,7 @@ def run_regenerate_workflow(
         prompt=prompt,
         current_teams=current_teams,
     )
+    state["progress_callback"] = progress_callback
 
     while state.get("iteration_count", 0) < MAX_ITERATION:
         state = {
@@ -3145,13 +3191,17 @@ def run_regenerate_workflow(
         **state,
         **result,
     }
-    save_workflow_result(final_state)
+    if persist_result:
+        save_workflow_result(final_state)
     return final_state
 
 
 # 일반 팀 매칭 워크플로우의 최초 state를 만든다.
 # 학생 분석 결과를 로드하고 나머지 상태 필드는 빈 값으로 초기화한다.
-def build_initial_state(analyzed_students: Optional[List[Dict[str, Any]]] = None) -> MatchingState:
+def build_initial_state(
+    analyzed_students: Optional[List[Dict[str, Any]]] = None,
+    progress_callback: Optional[Callable[[str, List[Dict[str, Any]]], None]] = None,
+) -> MatchingState:
     return {
         "analyzed_students": analyzed_students or load_analysis_output_json(), #여기서 불러온거 학생분석 analyzed state에 넣어줌
         "teams": [],
@@ -3161,6 +3211,7 @@ def build_initial_state(analyzed_students: Optional[List[Dict[str, Any]]] = None
         "final_result": {},
         "llm_result": {},
         "iteration_count": 0,
+        "progress_callback": progress_callback,
     }
 
 
@@ -3216,24 +3267,36 @@ def build_algorithm_only_result(state: MatchingState, error: Exception) -> Match
 
 # 일반 팀 매칭 워크플로우의 공개 진입점이다.
 # 캐시 사용 여부를 확인하고, LangGraph 실행 실패 시 규칙 기반 fallback 결과를 저장/반환한다.
-def run_workflow(force_rematch=False, analyzed_students: Optional[List[Dict[str, Any]]] = None):
+def run_workflow(
+    force_rematch=False,
+    analyzed_students: Optional[List[Dict[str, Any]]] = None,
+    persist_result: bool = True,
+    progress_callback: Optional[Callable[[str, List[Dict[str, Any]]], None]] = None,
+):
     cached_result = load_cached_matching_result(force_rematch=force_rematch)
     if cached_result is not None:
         print("기존 매칭 결과를 MySQL에서 불러오는 중")
         return cached_result
 
-    initial_state = build_initial_state(analyzed_students=analyzed_students)
+    initial_state = build_initial_state(
+        analyzed_students=analyzed_students,
+        progress_callback=progress_callback,
+    )
     try:
         result = app.invoke(initial_state)
     except Exception as error:
         print(f"LLM 매칭 실패. 규칙 기반 팀 배정으로 fallback합니다: {error}")
         result = build_algorithm_only_result(initial_state, error)
+        fallback_teams = get_candidate_teams(result.get("final_result", {}))
+        emit_matching_progress(initial_state, "team_preview", fallback_teams)
+        emit_matching_progress(initial_state, "team_update", fallback_teams)
+        emit_matching_progress(initial_state, "team_ready", fallback_teams)
 
-    save_workflow_result(result)
+    if persist_result:
+        save_workflow_result(result)
     return result
 
 
 if __name__ == "__main__":
     result = run_workflow()
     print(json.dumps(result.get("final_result", result), ensure_ascii=False, indent=0))
-    
