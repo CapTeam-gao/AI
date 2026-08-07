@@ -80,6 +80,8 @@ class MatchingState(TypedDict):
     last_adjustment_improved: bool #직전 LLM 수정안이 이전 최고 후보보다 개선됐는지 여부
     regeneration_mode: bool #사용자 프롬프트 기반 재생성 경로인지 여부
     regeneration_base_teams: List[Dict[str, Any]] #재생성 전 팀을 보존해 불필요한 전체 재배치를 막는 기준
+    regeneration_constraints: Dict[str, Any] #자연어 재생성 요청에서 추출한 변경 범위와 검증 조건
+    regeneration_seed_teams: List[Dict[str, Any]] #대규모 재편성 요청을 만족하도록 코드로 만든 안전 후보
     progress_callback: Any #스트림 API가 팀 생성 진행 상황을 전달받는 선택적 콜백
 #team으로 알고리즘으로 team상태 저장하고
 #llm_result로 llm이 제안한 팀 상태 저장하고
@@ -851,6 +853,13 @@ class TeamMatchingResult(BaseModel):
     validation_notes: str = Field(description="중복/누락/팀 수/인원 차이 검증 결과와 요청을 반영하지 못한 이유")
 
 
+class RegenerationRequestCheck(BaseModel):
+    is_satisfied: bool = Field(description="팀 구성에 관한 사용자 요청이 후보 팀에 모두 반영됐는지 여부")
+    satisfied_requirements: List[str] = Field(default_factory=list, description="반영된 사용자 요구사항")
+    unmet_requirements: List[str] = Field(default_factory=list, description="반영되지 않은 사용자 요구사항")
+    summary: str = Field(description="판정 근거를 간단히 정리한 설명")
+
+
 
 # 1차 팀 초안을 LLM이 최소 보정하도록 하는 프롬프트 chain을 만든다.
 # 학생 분석, allowed names, initial teams, reason context를 입력받는 템플릿을 반환한다.
@@ -1128,7 +1137,12 @@ def find_split_keep_together_roles(team_evaluations):
 
 # 후보 팀 결과를 코드로 검증해 balance_result와 team_evaluations를 만든다.
 # 이름 중복/누락, 팀 수, 인원, 점수, 역할, 성향 리스크를 검사한다.
-def validation_balance_team(candidate_result, analyzed_students, base_teams=None):
+def validation_balance_team(
+    candidate_result,
+    analyzed_students,
+    base_teams=None,
+    enforce_keep_together_roles: bool = True,
+):
     # 알고리즘으로 팀 검증하여 수정할 필요가 있는지 없는지 판단한다.
     # 여기서는 LLM을 쓰지 않고, 이름/중복/누락/점수/인원/역할 분포를 코드로 검사한다.
     candidate_teams = get_candidate_teams(candidate_result) #candidate_result를 리스트로 저장
@@ -1245,7 +1259,11 @@ def validation_balance_team(candidate_result, analyzed_students, base_teams=None
     if member_counts and max(member_counts) - min(member_counts) > 1:
         warnings.append(f"팀 인원 차이가 1명을 초과합니다: {member_counts}")
 
-    split_keep_together_roles = find_split_keep_together_roles(team_evaluations)
+    split_keep_together_roles = (
+        find_split_keep_together_roles(team_evaluations)
+        if enforce_keep_together_roles
+        else []
+    )
     if split_keep_together_roles:
         errors.append(
             "같은 팀에 배치 가능한 역할군이 여러 팀으로 분리되었습니다: "
@@ -1466,6 +1484,65 @@ def repair_team_matching_result(
     }
 
 
+def evaluate_regeneration_request_with_llm(
+    prompt: str,
+    candidate_teams: List[Dict[str, Any]],
+    base_teams: List[Dict[str, Any]],
+    analyzed_students: List[Dict[str, Any]],
+    deterministic_compliance: Dict[str, Any],
+) -> Dict[str, Any]:
+    """정량화하기 어려운 자유 형식 재생성 요구까지 별도 LLM으로 점검한다."""
+    system_prompt = """
+    당신은 팀 재생성 결과의 사용자 요청 준수 여부만 판정하는 검증자다.
+    사용자 원문을 조건별 체크리스트로 나눈 뒤, 변경 전 팀과 후보 팀을 직접 비교한다.
+
+    판정 규칙:
+    - 중복/누락 같은 기본 구조가 아니라 사용자가 실제로 요청한 팀 구성 조건을 검사한다.
+    - 역할, 기술 스택, 구현 경험, 선호 팀원, 성향, 개발 역량, 특정 학생 이동, 팀장 조건을 빠짐없이 확인한다.
+    - "가능하면", "참고", "우선"은 소프트 조건으로 보되 합리적인 이유 없이 무시했으면 미반영으로 판단한다.
+    - 퍼센트, 동일 팀 금지, 변경 학생 비율은 deterministic_compliance 계산 결과를 그대로 신뢰한다.
+    - 결과 표시 형식, 이름과 학번 출력 같은 API 화면 요구는 여기서 평가하지 않는다.
+    - 후보가 조건을 만족한다는 change_summary 문장을 믿지 말고 실제 멤버 구성을 비교한다.
+    - 하나라도 실행 가능한 핵심 조건이 빠졌으면 is_satisfied=false로 반환한다.
+    """
+    user_prompt = """
+    user_request:
+    {user_request}
+
+    regeneration_base_teams:
+    {base_teams}
+
+    candidate_teams:
+    {candidate_teams}
+
+    student_analysis:
+    {student_analysis}
+
+    deterministic_compliance:
+    {deterministic_compliance}
+    """
+    chain = ChatPromptTemplate.from_messages([
+        ("system", system_prompt),
+        ("human", user_prompt),
+    ]) | get_llm().with_structured_output(RegenerationRequestCheck)
+    response = chain.invoke({
+        "user_request": prompt,
+        "base_teams": json.dumps(base_teams, ensure_ascii=False, indent=0),
+        "candidate_teams": json.dumps(candidate_teams, ensure_ascii=False, indent=0),
+        "student_analysis": json.dumps(
+            [make_student_summary(student) for student in analyzed_students],
+            ensure_ascii=False,
+            indent=0,
+        ),
+        "deterministic_compliance": json.dumps(
+            deterministic_compliance,
+            ensure_ascii=False,
+            indent=0,
+        ),
+    })
+    return response.model_dump() if hasattr(response, "model_dump") else response
+
+
 # LangGraph에서 후보 팀의 균형 검증을 담당하는 노드다.
 # 코드 검증을 우선하고, 구조 오류가 있을 때만 LLM 검증 결과를 참고로 합친다.
 def evaluate_balance_node(state: MatchingState) -> Dict[str, Any]:
@@ -1477,12 +1554,49 @@ def evaluate_balance_node(state: MatchingState) -> Dict[str, Any]:
     analyzed_students = state.get("analyzed_students", [])
     base_teams = state.get("teams", [])
     candidate_result = state.get("llm_result") or base_teams
+    regeneration_constraints = state.get("regeneration_constraints", {})
+    distribute_roles = bool(regeneration_constraints.get("distribute_roles"))
 
     algorithm_result, team_evaluations = validation_balance_team( #알고리즘으로 검증
         candidate_result=candidate_result,
         analyzed_students=analyzed_students,
         base_teams=base_teams,
+        enforce_keep_together_roles=not distribute_roles,
     )
+    if state.get("regeneration_mode"):
+        regeneration_compliance = validate_regeneration_constraints(
+            candidate_teams=get_candidate_teams(candidate_result),
+            base_teams=state.get("regeneration_base_teams", []),
+            analyzed_students=analyzed_students,
+            constraints=regeneration_constraints,
+        )
+        algorithm_result["regeneration_compliance"] = regeneration_compliance
+        algorithm_result["request_errors"] = regeneration_compliance["errors"]
+        algorithm_result["errors"] = list(algorithm_result.get("errors", [])) + regeneration_compliance["errors"]
+        algorithm_result["warnings"] = list(algorithm_result.get("warnings", [])) + regeneration_compliance["warnings"]
+        algorithm_result["is_balanced"] = not algorithm_result["errors"]
+        algorithm_result["need_adjustment"] = bool(algorithm_result["errors"])
+        if not regeneration_compliance["errors"]:
+            try:
+                request_check = evaluate_regeneration_request_with_llm(
+                    prompt=regeneration_constraints.get("original_prompt", ""),
+                    candidate_teams=get_candidate_teams(candidate_result),
+                    base_teams=state.get("regeneration_base_teams", []),
+                    analyzed_students=analyzed_students,
+                    deterministic_compliance=regeneration_compliance,
+                )
+                algorithm_result["request_llm_evaluation"] = request_check
+                if not request_check.get("is_satisfied", False):
+                    unmet = request_check.get("unmet_requirements") or [request_check.get("summary", "사용자 요청 미반영")]
+                    request_error = f"사용자 재생성 요청 미반영 항목: {unmet}"
+                    algorithm_result["request_errors"].append(request_error)
+                    algorithm_result["errors"].append(request_error)
+                    algorithm_result["is_balanced"] = False
+                    algorithm_result["need_adjustment"] = True
+            except Exception as error:
+                algorithm_result["warnings"].append(
+                    f"사용자 요청 정성 검증을 완료하지 못했습니다: {type(error).__name__}"
+                )
     if algorithm_result.get("errors"):
         llm_result = llm_validation_balance_team( #llm으로 검증
             candidate_result=candidate_result,
@@ -1772,9 +1886,25 @@ def should_adjust_normal_workflow(state: MatchingState):
 # TeamMatchingResult, FinalTeam, get_llm()은 위에서 정의한 것을 재사용한다.
 # 검증 실패한 팀 후보를 LLM이 다시 조정하도록 하는 프롬프트 chain을 만든다.
 # 현재 후보, 알고리즘 초안, 검증 결과, 조정 이력을 입력 변수로 사용한다.
-def build_adjustment_scope_rules(regeneration_mode: bool) -> str:
+def build_adjustment_scope_rules(
+    regeneration_mode: bool,
+    constraints: Optional[Dict[str, Any]] = None,
+) -> str:
     if not regeneration_mode:
         return "일반 검증 수정이므로 current_candidate에서 오류가 있는 부분만 최소 수정한다."
+
+    constraints = constraints or {}
+    if constraints.get("scope") in {"balanced_rebuild", "full_rebuild"}:
+        return """
+        이 작업은 기존 팀을 참고만 하고 새 조합을 만드는 대규모 재편성이다.
+        - 중복/누락/없는 이름/팀 수/인원 차이 필수 규칙 다음으로 사용자 요청과 regeneration_constraints의 정량 조건을 최우선으로 지킨다.
+        - current_candidate는 기존 조합을 줄이도록 코드가 만든 새 초안이다. regeneration_base_teams로 되돌리거나 최소 수정 방향으로 축소하지 않는다.
+        - 기존 팀원 쌍 유지 비율, 변경 학생 비율, 동일 팀 금지 조건은 balance_result.algorithm_result.regeneration_compliance의 errors를 전부 해결한다.
+        - 사용자 요청이 역할 분산을 요구하면 game을 포함한 역할군을 여러 팀에 분산할 수 있다.
+        - 역할·기술·구현경험·성향·개발역량·선호팀원을 함께 보되, 선호팀원보다 전체 팀 균형과 명시된 재편성 비율을 우선한다.
+        - 같은 반과 같은 번호 학생은 가능한 서로 다른 팀으로 분산한다.
+        - 요청을 만족하는 후보 중 팀 점수 격차와 역할 중복이 작은 안을 선택한다.
+        """.strip()
 
     return """
     이 작업은 사용자 프롬프트 기반 재생성이다.
@@ -1799,7 +1929,7 @@ def get_adjust_team_prompt_chain():
     balance_result의 알고리즘 검증 결과와 LLM 검증 결과를 모두 반영해서 팀을 다시 제안하라.
 
     수정 원칙:
-    - current_candidate를 기본으로 유지하고, 문제가 있는 부분만 최소한으로 수정한다.
+    - current_candidate를 시작점으로 사용하되, 실제 변경 범위는 adjustment_scope_rules와 regeneration_constraints를 따른다.
     - algorithm_teams는 원래 알고리즘 초안이므로 참고 기준으로 사용한다.
     - 모든 학생은 정확히 한 팀에만 배정한다.
     - 팀 수는 algorithm_teams와 동일하게 유지한다.
@@ -1807,7 +1937,7 @@ def get_adjust_team_prompt_chain():
     - 팀 총점 차이를 크게 악화시키지 않는다.
     - 하 또는 낮음 학생은 가능하면 중 이상의 학생과 함께 둔다.
     - 같은 role_group만으로 구성된 팀은 가능하면 피하되, game 역할군은 이 규칙의 예외다.
-    - game 역할군 전체 인원이 한 팀 정원 이하이면 반드시 전원을 같은 팀에 배치한다. 이 조건은 점수, 역할 다양성, 성향, 선호보다 우선한다.
+    - game 역할군 전체 인원이 한 팀 정원 이하이면 반드시 전원을 같은 팀에 배치한다. 단, adjustment_scope_rules가 역할군 분산을 명시한 재생성에서는 이 규칙을 적용하지 않는다.
     - 팀 인원, 점수, 역할군, 성향 균형과 algorithm_result.errors 해결을 preferred_members보다 우선한다.
     - 서로를 선택한 상호 선호 페어는 균형이 비슷한 대안 중에서 우선 유지한다.
     - 역할군 이동이나 학생 교환 시 상호 선호 페어를 함께 이동해도 균형이 악화되지 않는지 먼저 검토한다.
@@ -1819,11 +1949,14 @@ def get_adjust_team_prompt_chain():
     작업별 변경 범위 제한:
     {adjustment_scope_rules}
 
+    사용자 요청에서 추출한 검증 조건:
+    {regeneration_constraints}
+
     반영해야 할 정보:
     - balance_result.algorithm_result.errors는 반드시 해결한다.
     - balance_result.algorithm_result.warnings는 가능하면 완화한다.
     - balance_result.llm_result.adjustment_request는 사용자의 재생성 요청이다. 중복/누락/없는 이름/팀 수/팀 인원 차이 규칙을 깨지 않는 범위에서 적극적으로 반영한다.
-    - 사용자 요청이 특정 역할군 분산, 팀원 이동, 팀장 변경처럼 실행 가능한 조건이면 current_candidate에서 최소 이동으로 반영한다.
+    - 사용자 요청이 특정 역할군 분산, 팀원 이동, 팀장 변경처럼 실행 가능한 조건이면 adjustment_scope_rules의 변경 범위에 맞춰 반영한다.
     - current_candidate가 이미 사용자 요청을 만족하거나 검증 규칙 때문에 반영할 수 없는 경우가 아니라면 changed=false로 두지 않는다.
     - 사용자 요청을 전부 반영할 수 없으면 가능한 부분만 반영하고, 불가능한 이유를 validation_notes에 명확히 쓴다.
     - student_analysis의 strength, weakness, suggestion은 내부 판단 근거로만 사용하고 reason에 학생별 분석문을 옮겨 쓰지 않는다.
@@ -1831,8 +1964,8 @@ def get_adjust_team_prompt_chain():
 
     계산 규칙:
     - 역할군 응집 오류를 고칠 때 해당 역할군의 전체 학생 수, 현재 팀별 인원, 이동할 학생 수를 먼저 계산한다.
-    - game 학생 수가 한 팀 정원 이하이면 전원 한 팀 배치가 가능하다. 예: game 학생 5명이고 팀 정원이 5명이면 반드시 5명을 한 팀에 배치하며 불가능하다고 판단하지 않는다.
-    - game 학생 수가 한 팀 정원을 초과할 때만 여러 팀으로 나눌 수 있고, 이 경우 사용하는 팀 수를 최소화한다.
+    - 역할군 분산 요청이 없으면 game 학생 5명이고 팀 정원이 5명이면 반드시 5명을 한 팀에 배치한다.
+    - 역할군 분산 요청이 있으면 game도 다른 역할군과 마찬가지로 전체 팀 균형에 맞춰 분산한다.
     - 점수는 student_analysis 또는 algorithm_teams에 있는 score 값만 사용한다.
     - 새로운 점수나 skill_level을 만들지 않는다.
     - total_score는 최종 팀원의 score 합으로 작성한다.
@@ -1857,7 +1990,7 @@ def get_adjust_team_prompt_chain():
     아래 검증 실패 정보를 바탕으로 팀 후보를 수정해라.
     algorithm_result.errors의 중복 배정, 누락 학생, 없는 이름, 팀 수 오류를 최우선으로 해결해라.
     역할군 응집 오류는 전체 대상 인원과 팀 정원을 계산해 반드시 해결해라.
-    최종 출력 전에 game 학생이 함께 배치 가능한데 여러 팀에 나뉘었는지 검사하고, 나뉘었다면 출력하지 말고 다시 배치해라.
+    역할군 분산 요청이 없을 때 game 학생이 함께 배치 가능한데 여러 팀에 나뉘었다면 출력하지 말고 다시 배치해라.
     balance_result.llm_result.adjustment_request는 사용자 재생성 요청이다. 중복/누락/없는 이름/팀 수/인원 차이 규칙을 깨지 않는 범위에서 적극적으로 반영해라.
     사용자 요청을 완전히 반영할 수 없으면 가능한 대안을 적용하고 validation_notes에 반영하지 못한 이유를 써라.
     이 단계에서는 팀원 배정, 역할 분포, 팀장만 결정하고 배정 이유는 작성하지 마라.
@@ -1909,6 +2042,7 @@ def adjust_team_node(state: MatchingState) -> Dict[str, Any]:
     reason_context = build_reason_context(current_candidate, analyzed_students)
     regeneration_mode = state.get("regeneration_mode", False)
     regeneration_base_teams = state.get("regeneration_base_teams") or current_candidate
+    regeneration_constraints = state.get("regeneration_constraints", {})
 
     llm = get_llm()
     structured_llm = llm.with_structured_output(TeamMatchingResult)
@@ -1919,7 +2053,11 @@ def adjust_team_node(state: MatchingState) -> Dict[str, Any]:
         "student_analysis": json.dumps(analyzed_students, ensure_ascii=False, indent=0),
         "algorithm_teams": json.dumps(algorithm_teams, ensure_ascii=False, indent=0),
         "regeneration_base_teams": json.dumps(regeneration_base_teams, ensure_ascii=False, indent=0),
-        "adjustment_scope_rules": build_adjustment_scope_rules(regeneration_mode),
+        "adjustment_scope_rules": build_adjustment_scope_rules(
+            regeneration_mode,
+            regeneration_constraints,
+        ),
+        "regeneration_constraints": json.dumps(regeneration_constraints, ensure_ascii=False, indent=0),
         "current_candidate": json.dumps(current_candidate, ensure_ascii=False, indent=0),
         "reason_context": json.dumps(reason_context, ensure_ascii=False, indent=0),
         "balance_result": json.dumps(balance_result, ensure_ascii=False, indent=0),
@@ -3088,6 +3226,346 @@ def normalize_current_teams(current_teams: Any) -> List[Dict[str, Any]]:
     ]
 
 
+def parse_regeneration_constraints(prompt: str) -> Dict[str, Any]:
+    """자연어 요청에서 코드로 확인 가능한 재생성 조건을 추출한다."""
+    text = re.sub(r"\s+", " ", str(prompt or "")).strip().lower()
+    max_preserved_pair_ratio = None
+    min_changed_student_ratio = None
+
+    for match in re.finditer(r"(\d{1,3}(?:\.\d+)?)\s*%", text):
+        ratio = min(1.0, max(0.0, float(match.group(1)) / 100))
+        window = text[max(0, match.start() - 45): min(len(text), match.end() + 45)]
+        if any(word in window for word in ("기존", "가안", "이전", "원래")) and any(
+            word in window for word in ("참고", "반영", "유지", "조합", "겹")
+        ):
+            max_preserved_pair_ratio = (
+                ratio
+                if max_preserved_pair_ratio is None
+                else min(max_preserved_pair_ratio, ratio)
+            )
+        if any(word in window for word in ("새", "재편", "변경", "다른", "섞")):
+            min_changed_student_ratio = (
+                ratio
+                if min_changed_student_ratio is None
+                else max(min_changed_student_ratio, ratio)
+            )
+
+    full_rebuild = any(
+        phrase in text
+        for phrase in (
+            "전부 새", "모두 새", "완전히 새", "전체 재편", "처음부터 다시",
+        )
+    )
+    broad_rebuild = full_rebuild or any(
+        phrase in text
+        for phrase in (
+            "그대로 유지하지", "대부분의 학생", "대부분 다른", "새 조합",
+            "새롭게 팀", "새롭게 섞", "재편성", "대폭 변경",
+        )
+    )
+    if min_changed_student_ratio is not None and min_changed_student_ratio >= 0.5:
+        broad_rebuild = True
+    if max_preserved_pair_ratio is not None and max_preserved_pair_ratio <= 0.5:
+        broad_rebuild = True
+
+    if full_rebuild:
+        min_changed_student_ratio = max(min_changed_student_ratio or 0, 1.0)
+        max_preserved_pair_ratio = min(max_preserved_pair_ratio or 1.0, 0.05)
+    elif broad_rebuild and min_changed_student_ratio is None:
+        min_changed_student_ratio = 0.6
+
+    forbid_unchanged_teams = any(
+        phrase in text
+        for phrase in (
+            "완전히 똑같은 팀", "똑같은 팀이 나오면 안", "동일한 팀 금지",
+            "같은 팀 그대로", "기존 팀 그대로",
+        )
+    )
+    spread_class_or_number = (
+        any(word in text for word in ("같은 반", "동일 반", "같은 번호", "학번"))
+        and any(word in text for word in ("몰리지", "분산", "과도", "겹치지"))
+    )
+    distribute_roles = any(word in text for word in ("직군", "역할", "role")) and any(
+        word in text for word in ("균형", "분산", "섞", "몰리지")
+    )
+
+    return {
+        "scope": "full_rebuild" if full_rebuild else ("balanced_rebuild" if broad_rebuild else "minimal_change"),
+        "max_preserved_pair_ratio": max_preserved_pair_ratio,
+        "min_changed_student_ratio": min_changed_student_ratio,
+        "forbid_unchanged_teams": forbid_unchanged_teams,
+        "spread_class_or_number": spread_class_or_number,
+        "distribute_roles": distribute_roles,
+        "balance_skills": any(word in text for word in ("상위권", "하위권", "실력", "역량", "점수")),
+        "consider_preferences": any(word in text for word in ("선호팀원", "선호 팀원", "선호")),
+        "original_prompt": str(prompt or "").strip(),
+    }
+
+
+def extract_reference_teams_from_prompt(
+    prompt: str,
+    analyzed_students: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """프롬프트가 '기존 가안'이라고 명시한 팀 표를 비교 기준으로 추출한다."""
+    text = str(prompt or "")
+    lowered = text.lower()
+    if not any(
+        phrase in lowered
+        for phrase in ("참고용 기존 가안", "참고용 가안", "기존 가안", "기존 편성안")
+    ):
+        return []
+
+    allowed_names = sorted(
+        [student.get("name") for student in analyzed_students if student.get("name")],
+        key=lambda name: (-len(name), name),
+    )
+    extracted = []
+    assigned = set()
+    for line in text.splitlines():
+        match = re.match(r"^\s*(?:팀\s*)?(\d{1,2})\s*(?:팀|[.):\-])?\s+(.+)$", line)
+        if not match:
+            continue
+        remainder = match.group(2)
+        members = []
+        for name in allowed_names:
+            if name in assigned or name not in remainder:
+                continue
+            members.append(name)
+            assigned.add(name)
+        if members:
+            extracted.append({
+                "team_name": f"팀 {match.group(1)}",
+                "members": members,
+                "total_score": 0,
+                "role_groups": [],
+                "leader": "",
+                "reason": "",
+                "reason_cards": [],
+            })
+
+    minimum_coverage = max(2, math.ceil(len(allowed_names) * 0.7))
+    if len(assigned) < minimum_coverage or len(extracted) < 2:
+        return []
+
+    # 표에서 빠진 학생은 누락시키지 않고 가장 작은 팀부터 채운다.
+    for name in [name for name in allowed_names if name not in assigned]:
+        min(extracted, key=lambda team: len(team["members"]))["members"].append(name)
+    return extracted
+
+
+def get_student_school_group(student: Dict[str, Any]) -> Dict[str, str]:
+    user_id = str(
+        student.get("user_id")
+        or student.get("userId")
+        or student.get("student_id")
+        or ""
+    ).strip()
+    match = re.match(r"(?i)^stu(\d)(\d)(\d{2,})$", user_id)
+    if not match:
+        return {"class": "", "number": ""}
+    return {
+        "class": f"{match.group(1)}-{match.group(2)}",
+        "number": match.group(3),
+    }
+
+
+def build_teammate_map(teams: List[Dict[str, Any]]) -> Dict[str, set]:
+    teammate_map: Dict[str, set] = {}
+    for team in get_candidate_teams(teams):
+        members = get_member_names(team)
+        for name in members:
+            teammate_map[name] = set(members) - {name}
+    return teammate_map
+
+
+def build_team_pairs(teams: List[Dict[str, Any]]) -> set:
+    pairs = set()
+    for team in get_candidate_teams(teams):
+        members = get_member_names(team)
+        for first_index, first_name in enumerate(members):
+            for second_name in members[first_index + 1:]:
+                pairs.add(frozenset((first_name, second_name)))
+    return pairs
+
+
+def create_regeneration_seed_teams(
+    analyzed_students: List[Dict[str, Any]],
+    base_teams: List[Dict[str, Any]],
+    constraints: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """기존 팀의 학생을 서로 다른 새 팀으로 분산해 대규모 재편성 초안을 만든다."""
+    base_teams = get_candidate_teams(base_teams)
+    if not base_teams:
+        return create_initial_teams(analyzed_students)
+
+    student_lookup = build_student_lookup(analyzed_students)
+    team_count = len(base_teams)
+    base_size = len(student_lookup) // team_count
+    larger_team_count = len(student_lookup) % team_count
+    capacities = [
+        base_size + 1 if index < larger_team_count else base_size
+        for index in range(team_count)
+    ]
+    targets = [
+        {
+            "team_name": base_teams[index].get("team_name") or f"팀 {index + 1}",
+            "members": [],
+            "score": 0.0,
+            "source_indexes": set(),
+        }
+        for index in range(team_count)
+    ]
+
+    source_groups = []
+    assigned = set()
+    for source_index, team in enumerate(base_teams):
+        names = [name for name in get_member_names(team) if name in student_lookup and name not in assigned]
+        assigned.update(names)
+        source_groups.append((source_index, names))
+    missing_names = [name for name in student_lookup if name not in assigned]
+    if missing_names:
+        source_groups.append((team_count, missing_names))
+
+    for source_index, names in source_groups:
+        ordered_names = sorted(
+            names,
+            key=lambda name: (-float(student_lookup[name].get("score", 0) or 0), name),
+        )
+        for name in ordered_names:
+            student = student_lookup[name]
+            role_group = student.get("role_group") or get_role_group(student.get("role"))
+            school_group = get_student_school_group(student)
+            available = [
+                index for index, target in enumerate(targets)
+                if len(target["members"]) < capacities[index]
+            ]
+            if not available:
+                available = list(range(team_count))
+
+            def placement_cost(index: int):
+                target = targets[index]
+                target_students = [student_lookup[member] for member in target["members"]]
+                same_source = 1 if source_index in target["source_indexes"] else 0
+                same_class = sum(
+                    1 for member in target_students
+                    if school_group["class"]
+                    and get_student_school_group(member)["class"] == school_group["class"]
+                )
+                same_number = sum(
+                    1 for member in target_students
+                    if school_group["number"]
+                    and get_student_school_group(member)["number"] == school_group["number"]
+                )
+                same_role = sum(
+                    1 for member in target_students
+                    if (member.get("role_group") or get_role_group(member.get("role"))) == role_group
+                )
+                return (
+                    same_source,
+                    same_class if constraints.get("spread_class_or_number") else 0,
+                    same_number if constraints.get("spread_class_or_number") else 0,
+                    same_role if constraints.get("distribute_roles") else 0,
+                    round(target["score"], 2),
+                    len(target["members"]),
+                    index,
+                )
+
+            target_index = min(available, key=placement_cost)
+            targets[target_index]["members"].append(name)
+            targets[target_index]["score"] += float(student.get("score", 0) or 0)
+            targets[target_index]["source_indexes"].add(source_index)
+
+    return [
+        rebuild_repaired_team(target["team_name"], target["members"], student_lookup)
+        for target in targets
+    ]
+
+
+def validate_regeneration_constraints(
+    candidate_teams: List[Dict[str, Any]],
+    base_teams: List[Dict[str, Any]],
+    analyzed_students: List[Dict[str, Any]],
+    constraints: Dict[str, Any],
+) -> Dict[str, Any]:
+    errors = []
+    warnings = []
+    base_pairs = build_team_pairs(base_teams)
+    candidate_pairs = build_team_pairs(candidate_teams)
+    retained_pair_count = len(base_pairs & candidate_pairs)
+    preserved_pair_ratio = retained_pair_count / max(1, len(candidate_pairs))
+
+    base_teammates = build_teammate_map(base_teams)
+    candidate_teammates = build_teammate_map(candidate_teams)
+    comparable_names = set(base_teammates) & set(candidate_teammates)
+    changed_names = [
+        name for name in comparable_names
+        if base_teammates[name] != candidate_teammates[name]
+    ]
+    changed_student_ratio = len(changed_names) / max(1, len(comparable_names))
+
+    base_team_sets = {frozenset(get_member_names(team)) for team in get_candidate_teams(base_teams)}
+    unchanged_teams = [
+        team.get("team_name") or f"팀 {index + 1}"
+        for index, team in enumerate(get_candidate_teams(candidate_teams))
+        if frozenset(get_member_names(team)) in base_team_sets
+    ]
+
+    max_pair_ratio = constraints.get("max_preserved_pair_ratio")
+    if max_pair_ratio is not None and preserved_pair_ratio > float(max_pair_ratio) + 1e-9:
+        errors.append(
+            "사용자 요청보다 기존 팀원 조합이 많이 유지되었습니다. "
+            f"actual={preserved_pair_ratio:.1%}, max={float(max_pair_ratio):.1%}"
+        )
+
+    min_changed_ratio = constraints.get("min_changed_student_ratio")
+    if min_changed_ratio is not None and changed_student_ratio + 1e-9 < float(min_changed_ratio):
+        errors.append(
+            "새 팀원 조합으로 변경된 학생 비율이 사용자 요청보다 낮습니다. "
+            f"actual={changed_student_ratio:.1%}, min={float(min_changed_ratio):.1%}"
+        )
+
+    if constraints.get("forbid_unchanged_teams") and unchanged_teams:
+        errors.append(f"기존과 완전히 동일한 팀이 남아 있습니다: {unchanged_teams}")
+
+    class_concentrations = []
+    if constraints.get("spread_class_or_number"):
+        student_lookup = build_student_lookup(analyzed_students)
+        for index, team in enumerate(get_candidate_teams(candidate_teams)):
+            members = get_member_names(team)
+            class_counts: Dict[str, int] = {}
+            number_counts: Dict[str, int] = {}
+            for name in members:
+                group = get_student_school_group(student_lookup.get(name, {}))
+                if group["class"]:
+                    class_counts[group["class"]] = class_counts.get(group["class"], 0) + 1
+                if group["number"]:
+                    number_counts[group["number"]] = number_counts.get(group["number"], 0) + 1
+            max_allowed_class = max(2, math.ceil(len(members) / 2))
+            overloaded_classes = {
+                key: count for key, count in class_counts.items()
+                if count > max_allowed_class
+            }
+            duplicated_numbers = {key: count for key, count in number_counts.items() if count > 1}
+            if overloaded_classes or duplicated_numbers:
+                class_concentrations.append({
+                    "team_name": team.get("team_name") or f"팀 {index + 1}",
+                    "classes": overloaded_classes,
+                    "numbers": duplicated_numbers,
+                })
+        if class_concentrations:
+            warnings.append(f"같은 반 또는 같은 번호 학생이 일부 팀에 겹칩니다: {class_concentrations}")
+
+    return {
+        "errors": errors,
+        "warnings": warnings,
+        "preserved_pair_ratio": round(preserved_pair_ratio, 4),
+        "changed_student_ratio": round(changed_student_ratio, 4),
+        "retained_pair_count": retained_pair_count,
+        "unchanged_teams": unchanged_teams,
+        "class_concentrations": class_concentrations,
+    }
+
+
 # 사용자 재생성 프롬프트를 반영할 초기 LangGraph state를 만든다.
 # 분석 학생, prompt, 현재 팀을 입력받아 adjust_team_node부터 시작 가능한 상태를 반환한다.
 def build_regenerate_state(
@@ -3096,23 +3574,51 @@ def build_regenerate_state(
     current_teams: Optional[List[Dict[str, Any]]] = None,
 ) -> MatchingState:
     algorithm_teams = create_initial_teams(analyzed_students)
-    current_candidate = normalize_current_teams(current_teams)
-    current_candidate_source = "request_current_teams" if current_candidate else ""
-    if not current_candidate:
+    constraints = parse_regeneration_constraints(prompt)
+    prompt_reference_teams = extract_reference_teams_from_prompt(prompt, analyzed_students)
+    regeneration_base_teams = prompt_reference_teams or normalize_current_teams(current_teams)
+    current_candidate_source = (
+        "prompt_reference_teams"
+        if prompt_reference_teams
+        else ("request_current_teams" if regeneration_base_teams else "")
+    )
+    if not regeneration_base_teams:
         cached_result = load_cached_matching_result(force_rematch=False) or {}
-        current_candidate = normalize_current_teams(
+        regeneration_base_teams = normalize_current_teams(
             get_candidate_teams((cached_result.get("final_result") or cached_result))
         )
-        current_candidate_source = "cached_matching_result" if current_candidate else ""
-    if not current_candidate:
-        current_candidate = algorithm_teams
+        current_candidate_source = "cached_matching_result" if regeneration_base_teams else ""
+    if not regeneration_base_teams:
+        regeneration_base_teams = copy.deepcopy(algorithm_teams)
         current_candidate_source = "algorithm_initial_teams"
+
+    regeneration_seed_teams = []
+    if constraints.get("scope") in {"balanced_rebuild", "full_rebuild"}:
+        regeneration_seed_teams = create_regeneration_seed_teams(
+            analyzed_students,
+            regeneration_base_teams,
+            constraints,
+        )
+    current_candidate = regeneration_seed_teams or copy.deepcopy(regeneration_base_teams)
 
     algorithm_result, team_evaluations = validation_balance_team(
         candidate_result=current_candidate,
         analyzed_students=analyzed_students,
         base_teams=algorithm_teams,
+        enforce_keep_together_roles=not constraints.get("distribute_roles", False),
     )
+    regeneration_compliance = validate_regeneration_constraints(
+        candidate_teams=current_candidate,
+        base_teams=regeneration_base_teams,
+        analyzed_students=analyzed_students,
+        constraints=constraints,
+    )
+    algorithm_result["regeneration_compliance"] = regeneration_compliance
+    algorithm_result["request_errors"] = regeneration_compliance["errors"]
+    algorithm_result["errors"] = list(algorithm_result.get("errors", [])) + regeneration_compliance["errors"]
+    algorithm_result["warnings"] = list(algorithm_result.get("warnings", [])) + regeneration_compliance["warnings"]
+    algorithm_result["is_balanced"] = not algorithm_result["errors"]
+    algorithm_result["need_adjustment"] = bool(algorithm_result["errors"])
     balance_result = {
         "is_balanced": False,
         "need_adjustment": True,
@@ -3139,8 +3645,12 @@ def build_regenerate_state(
         "final_result": {},
         "llm_result": {
             "final_teams": current_candidate,
-            "changed": False,
-            "change_summary": "사용자 프롬프트 재생성 전 현재 팀 구성입니다.",
+            "changed": bool(regeneration_seed_teams),
+            "change_summary": (
+                "사용자 요청의 대규모 재편성 조건을 반영한 새 초안입니다."
+                if regeneration_seed_teams
+                else "사용자 프롬프트 재생성 전 현재 팀 구성입니다."
+            ),
             "validation_notes": (
                 "사용자 프롬프트를 반영해 조정합니다. "
                 f"기준 팀 출처: {current_candidate_source}."
@@ -3148,7 +3658,9 @@ def build_regenerate_state(
         },
         "iteration_count": 0,
         "regeneration_mode": True,
-        "regeneration_base_teams": copy.deepcopy(current_candidate),
+        "regeneration_base_teams": copy.deepcopy(regeneration_base_teams),
+        "regeneration_constraints": constraints,
+        "regeneration_seed_teams": copy.deepcopy(regeneration_seed_teams),
     }
 
 
@@ -3185,6 +3697,31 @@ def run_regenerate_workflow(
         balance_result = state.get("balance_result", {})
         if balance_result.get("is_balanced") and not balance_result.get("need_adjustment"):
             break
+
+    request_errors = (
+        state.get("balance_result", {})
+        .get("algorithm_result", {})
+        .get("request_errors", [])
+    )
+    regeneration_seed_teams = state.get("regeneration_seed_teams", [])
+    if request_errors and regeneration_seed_teams:
+        # LLM이 정량 재편성 조건을 다시 깨뜨렸으면, 조건을 만족하도록 코드가 만든
+        # 새 초안으로 복구한다. 누락/중복이 없는 후보만 이 경로를 사용할 수 있다.
+        seed_result = {
+            "final_teams": copy.deepcopy(regeneration_seed_teams),
+            "changed": True,
+            "change_summary": "기존 조합 제한과 학생 재배치 비율을 코드로 검증한 새 조합입니다.",
+            "validation_notes": "LLM 수정안이 정량 재생성 조건을 충족하지 못해 검증된 재편성 초안을 사용했습니다.",
+        }
+        seed_state = {**state, "llm_result": seed_result}
+        seed_evaluation = evaluate_balance_node(seed_state)
+        seed_request_errors = (
+            seed_evaluation.get("balance_result", {})
+            .get("algorithm_result", {})
+            .get("request_errors", [])
+        )
+        if len(seed_request_errors) < len(request_errors):
+            state = {**seed_state, **seed_evaluation}
 
     result = finalize_node(state)
     final_state = {
