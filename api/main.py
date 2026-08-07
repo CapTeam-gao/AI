@@ -416,7 +416,30 @@ def clean_reason_sections(reason: str) -> str:
     if not reason:
         return ""
 
-    return re.split(r"\s*\[(?:강점|보완점|약점|리스크)\]", reason, maxsplit=1)[0].strip()
+    text = str(reason).strip()
+    internal_labels = {
+        "team_name": "팀 이름",
+        "reason_cards": "배정 이유 카드",
+        "role_groups": "역할 구성",
+        "matching_evidence": "배정 근거",
+        "member_profiles": "팀원 정보",
+        "personality_evidence": "성향 참고",
+        "role_distribution": "역할 구성",
+        "implementation_connections": "역할 간 연결",
+        "leader_selection": "팀장 선정 근거",
+        "key_placements": "주요 배치 근거",
+        "trait_complements": "성향 보완 관계",
+        "response_reliability": "설문 응답 신뢰도",
+        "skill_level": "기술 수준",
+        "role_group": "역할 분야",
+        "top_skills": "주요 기술",
+        "roleGroup": "역할 분야",
+        "skillLevel": "기술 수준",
+    }
+    for internal_name, display_name in internal_labels.items():
+        text = text.replace(internal_name, display_name)
+
+    return re.split(r"\s*\[(?:강점|보완점|약점|리스크)\]", text, maxsplit=1)[0].strip(" \"'")
 
 
 # final_team의 reason_cards를 화면용 카드 리스트로 정규화한다.
@@ -429,7 +452,7 @@ def normalize_reason_cards(final_team: Dict[str, Any], matching_reason: str) -> 
             if not isinstance(card, dict):
                 continue
 
-            title = (card.get("title") or "").strip()
+            title = clean_reason_sections((card.get("title") or "").strip())
             description = clean_reason_sections((card.get("description") or "").strip())
             if title and description:
                 normalized_cards.append({

@@ -1594,9 +1594,14 @@ def evaluate_balance_node(state: MatchingState) -> Dict[str, Any]:
                     algorithm_result["is_balanced"] = False
                     algorithm_result["need_adjustment"] = True
             except Exception as error:
-                algorithm_result["warnings"].append(
-                    f"사용자 요청 정성 검증을 완료하지 못했습니다: {type(error).__name__}"
+                request_error = (
+                    "사용자 재생성 요청을 검증하지 못했습니다. "
+                    f"재시도 필요: {type(error).__name__}"
                 )
+                algorithm_result["request_errors"].append(request_error)
+                algorithm_result["errors"].append(request_error)
+                algorithm_result["is_balanced"] = False
+                algorithm_result["need_adjustment"] = True
     if algorithm_result.get("errors"):
         llm_result = llm_validation_balance_team( #llm으로 검증
             candidate_result=candidate_result,
@@ -2210,6 +2215,68 @@ def normalize_reason_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value)).strip()
 
 
+# LLM이 간혹 내부 데이터 필드명을 배정 이유에 그대로 적는 경우를 막기 위한
+# 화면 노출용 표현이다. 배정 이유는 선생님이 읽는 문장이므로 개발용 이름을
+# 그대로 보여주지 않는다.
+REASON_INTERNAL_FIELD_LABELS = {
+    "team_name": "팀 이름",
+    "reason_cards": "배정 이유 카드",
+    "role_groups": "역할 구성",
+    "matching_evidence": "배정 근거",
+    "member_profiles": "팀원 정보",
+    "personality_evidence": "성향 참고",
+    "role_distribution": "역할 구성",
+    "implementation_connections": "역할 간 연결",
+    "leader_selection": "팀장 선정 근거",
+    "key_placements": "주요 배치 근거",
+    "trait_complements": "성향 보완 관계",
+    "response_reliability": "설문 응답 신뢰도",
+    "skill_level": "기술 수준",
+    "role_group": "역할 분야",
+    "top_skills": "주요 기술",
+    "preferred_members": "희망 팀원",
+    "roleGroup": "역할 분야",
+    "skillLevel": "기술 수준",
+    "leader_reason": "팀장 선정 이유",
+    "strengths": "팀 강점",
+    "weaknesses": "보완할 점",
+}
+
+
+def sanitize_reason_card_text(value: Any) -> str:
+    """배정 이유 카드에 남아 있는 내부 필드명을 관리자용 표현으로 바꾼다."""
+    text = normalize_reason_text(value)
+    if not text:
+        return ""
+
+    for internal_name, display_name in sorted(
+        REASON_INTERNAL_FIELD_LABELS.items(),
+        key=lambda item: len(item[0]),
+        reverse=True,
+    ):
+        text = text.replace(internal_name, display_name)
+
+    # JSON/마크다운 형태가 섞여도 카드 안에는 문장만 남도록 한다.
+    text = text.replace("```json", "").replace("```", "")
+    return re.sub(r"\s+", " ", text).strip(" \"'")
+
+
+def sanitize_reason_cards(cards: Any) -> List[Dict[str, str]]:
+    """LLM이 만든 카드에서 내부 필드명과 빈 카드를 제거한다."""
+    if not isinstance(cards, list):
+        return []
+
+    sanitized = []
+    for card in cards:
+        if not isinstance(card, dict):
+            continue
+        title = sanitize_reason_card_text(card.get("title"))
+        description = sanitize_reason_card_text(card.get("description"))
+        if title and description:
+            sanitized.append({"title": title, "description": description})
+    return sanitized
+
+
 # 팀 내 역할 분포가 어떤 배정 근거가 되는지 짧게 정리한다.
 # 최종 reason LLM이 기술 나열 대신 실제 팀 구성 기준을 설명하도록 전달한다.
 def build_role_balance_evidence(role_counts: Dict[str, int]) -> List[str]:
@@ -2510,14 +2577,89 @@ def build_reason_card_context(final_teams, analyzed_students):
     )
     student_lookup = build_student_lookup(analyzed_students)
 
-    for context in contexts:
+    for context_index, source_context in enumerate(contexts):
         members = [
             student_lookup[name]
-            for name in context.get("members", [])
+            for name in source_context.get("members", [])
             if name in student_lookup
         ]
-        context.pop("trait_complements", None)
-        context["personality_evidence"] = build_personality_reason_evidence(members)
+        evidence = source_context.get("matching_evidence") or {}
+        preference = evidence.get("preference") or {}
+        leader_selection = evidence.get("leader_selection") or {}
+
+        role_distribution = [
+            f"{item.get('role')} {item.get('count')}명"
+            for item in evidence.get("role_distribution", [])
+            if item.get("role") and item.get("count")
+        ]
+        key_placements = [
+            f"{item.get('student')}: {item.get('reason')}"
+            for item in evidence.get("key_placements", [])
+            if item.get("student") and item.get("reason")
+        ]
+        implementation_connections = [
+            f"{item.get('source')}({item.get('source_role')}) → "
+            f"{item.get('target')}({item.get('target_role')}): {item.get('reason')}"
+            for item in evidence.get("implementation_connections", [])
+            if item.get("source") and item.get("target") and item.get("reason")
+        ]
+
+        if leader_selection.get("reason") == "wants_leader":
+            leader_evidence = (
+                f"{leader_selection.get('leader')}의 팀장 희망을 반영했습니다."
+            )
+        elif leader_selection.get("leader"):
+            leader_evidence = (
+                f"{leader_selection.get('leader')}을(를) 팀장으로 추천했습니다."
+            )
+        else:
+            leader_evidence = ""
+
+        personality_evidence = build_personality_reason_evidence(members)
+        personality_context = {
+            "성향 보완 관계": [
+                f"{item.get('member_to_support')}의 {item.get('trait')}을(를) "
+                f"{', '.join(item.get('supporters', []))}이(가) 보완할 수 있습니다."
+                for item in personality_evidence.get("complements", [])
+                if item.get("member_to_support") and item.get("supporters")
+            ],
+            "성향 강점": [
+                f"{item.get('name')}: {', '.join(item.get('traits', []))}"
+                for item in personality_evidence.get("strengths", [])
+                if item.get("name") and item.get("traits")
+            ],
+        }
+
+        # JSON 필드명을 그대로 보여주지 않고, LLM이 처음부터 선생님용 표현을
+        # 기준으로 문장을 만들도록 이유 생성 전용 context를 구성한다.
+        context = {
+            "팀 이름": source_context.get("team_name"),
+            "팀원": source_context.get("members", []),
+            "추천 팀장": source_context.get("leader", ""),
+            "팀원별 참고 정보": [
+                {
+                    "학생": member.get("name"),
+                    "역할 분야": member.get("role"),
+                    "주요 기술": member.get("top_skills", []),
+                    "설문 응답 신뢰도": member.get("response_reliability"),
+                    "강점": member.get("strength"),
+                    "참고사항": member.get("suggestion"),
+                }
+                for member in source_context.get("member_profiles", [])
+            ],
+            "배정 근거": {
+                "역할 구성": role_distribution,
+                "희망 팀원 반영": preference.get("matched", []),
+                "반영하지 못한 희망": preference.get("unmatched", []),
+                "팀장 선정 근거": leader_evidence,
+                "주요 배치 근거": key_placements,
+                "역할 간 연결": implementation_connections,
+                "주의할 점": evidence.get("risks", []),
+                "선호 관련 메모": evidence.get("team_notes", []),
+            },
+            "성향 참고": personality_context,
+        }
+        contexts[context_index] = context
 
     return contexts
 
@@ -2791,41 +2933,43 @@ def get_final_reason_cards_prompt_chain():
     팀원 배정은 이미 끝났으므로 팀원, 팀 수, 팀 이름, 팀장, 역할 분포를 절대 바꾸지 않는다.
     이 작업은 규칙 기반 fallback 문구를 대체하기 위한 최종 사용자 노출 문구 작성이다.
     절대 알고리즘 설명처럼 쓰지 말고, 실제 관리자가 납득할 수 있는 자연스러운 존댓말 문장으로 작성한다.
-    핵심은 matching_evidence, member_profiles, personality_evidence를 비교해 이 팀에서 가장 설득력 있는 배정 이유를 기본 3개 고르는 것이다.
+    핵심은 '배정 근거', '팀원별 참고 정보', '성향 참고'를 비교해 이 팀에서 가장 설득력 있는 배정 이유를 기본 3개 고르는 것이다.
     서로 다른 강한 근거가 충분하면 4개까지 작성하고, 근거가 부족하면 억지로 늘리지 말고 2개만 작성한다.
-    matching_evidence에는 알고리즘 초안, 점수 합계, 검증 결과가 없으므로 그런 값을 근거로 쓰지 않는다.
+    입력의 한글 항목명은 선생님이 이해하기 쉬운 설명용 이름이다. matching_evidence, member_profiles, personality_evidence 같은 내부 필드명은 문장에 절대 노출하지 않는다.
+    배정 근거에는 알고리즘 초안, 점수 합계, 검증 결과가 없으므로 그런 값을 근거로 쓰지 않는다.
     근거가 약한 리더십/역할 균형/기술 조합 카드를 억지로 만들지 않는다.
 
     출력 규칙:
     - 반드시 지정된 structured output schema에 맞춰 출력한다.
-    - teams의 각 항목은 team_name, reason_cards, reason만 포함한다.
+    - teams의 각 항목은 team_name, reason_cards, reason만 포함한다. 이 필드명은 출력 형식을 위한 내부 이름이며 카드 제목이나 설명에 쓰지 않는다.
     - 각 팀의 reason_cards는 기본 3개 작성한다.
     - 서로 다른 강한 근거가 충분하면 4개까지 작성할 수 있다.
     - 설득력 있는 근거가 부족하면 반복하거나 추측하지 말고 2개만 작성한다.
-    - reason_cards의 title은 팀의 가장 강한 배정 근거를 구체적으로 드러낸다.
+    - reason_cards의 title은 팀의 가장 강한 배정 근거를 드러내는 짧은 한글 제목으로 작성한다. 예: "희망 팀원을 반영한 협업 구성", "역할 간 연결을 고려한 배치", "서로의 강점을 보완하는 구성".
+    - title과 description에 영문 변수명, snake_case, JSON 키, 콜론으로 이어진 필드명, 대괄호 형태의 섹션명을 넣지 않는다.
     - "리더십 중심의 팀 운영 가능", "팀장 희망을 반영한 운영 중심 팀"은 팀장 희망 반영이 이 팀의 가장 중요한 이유일 때만 사용한다.
     - 각 description은 제목을 반복하지 말고 130~220자 정도의 2~3문장으로 작성한다.
     - 모든 description 문장은 관리자 화면에 그대로 노출된다. 반드시 존댓말로 작성하고, 모든 문장 끝은 "-습니다", "-입니다", "-됩니다", "-합니다" 중 하나로 끝낸다.
     - 절대 쓰면 안 되는 종결: "한다", "된다", "높인다", "해소한다", "유지한다", "기대된다", "가능하다", "충족시킨다".
     - 절대 쓰면 안 되는 표현: "알고리즘", "규칙 기반", "fallback", "점수 기준", "균형 계산", "시너지 극대화", "동시에 만족", "품질을 높인다".
     - 각 reason_card는 서로 다른 배정 근거를 담는다. 같은 말을 제목만 바꿔 반복하지 않는다.
-    - personality_evidence에 두 명 이상의 신뢰 가능한 서로 다른 성향 정보가 있으면 성향 보완 또는 성향 강점 조합을 설명하는 카드를 반드시 1개 작성한다.
+    - 성향 참고에 두 명 이상의 신뢰 가능한 서로 다른 성향 정보가 있으면 성향 보완 또는 성향 강점 조합을 설명하는 카드를 반드시 1개 작성한다.
     - 성향 카드는 구체적인 팀원 이름과 소통, 책임감, 협업, 유연성 같은 실제 라벨을 사용해 누가 어떤 부분을 보완하는지 설명한다.
     - 성향이 모두 좋다는 식의 칭찬이나 성향만으로 성과를 단정하는 문장은 쓰지 않는다.
-    - 카드 중 최소 1개는 matching_evidence.key_placements 또는 preference.matched를 반영한다.
-    - 최소 1개는 matching_evidence.implementation_connections를 반영해 역할 간 구현 흐름을 설명한다.
-    - preference.matched가 있으면 선호 관계를 우선 검토하되, 역할 균형이나 구현 연결이 약하면 억지로 쓰지 않는다.
-    - leader_selection은 보조 근거다. 팀장 희망이 실제 팀 운영상 핵심 장점일 때만 한 문장 이내로 언급한다.
-    - risks는 약점/주의점 근거로만 사용하고, 장점처럼 포장하지 않는다.
-    - suggestion은 참고 근거로만 사용하고 원문을 요약하거나 복사하지 않는다.
+    - 카드 중 최소 1개는 배정 근거의 주요 배치 근거 또는 희망 팀원 반영 내용을 반영한다.
+    - 최소 1개는 내부 데이터명 implementation_connections를 반영해 역할 간 구현 흐름을 설명한다. 화면 문장에는 내부 데이터명 대신 '역할 간 연결'이라는 자연스러운 표현만 사용한다.
+    - 희망 팀원 반영 내용이 있으면 우선 검토하되, 역할 균형이나 구현 연결이 약하면 억지로 쓰지 않는다.
+    - 팀장 선정 근거는 보조 근거다. 팀장 희망이 실제 팀 운영상 핵심 장점일 때만 한 문장 이내로 언급한다.
+    - 주의할 점은 약점/주의점 근거로만 사용하고, 장점처럼 포장하지 않는다.
+    - 참고사항은 참고 근거로만 사용하고 원문을 요약하거나 복사하지 않는다.
     - 각 카드 description에는 현재 팀원 중 필요한 1~2명의 이름을 언급하고, 왜 같은 팀에 둔 판단인지 설명한다.
     - "A가 선호한 B와 같은 팀에 배치해 초반 소통 비용을 줄이고, C가 부족한 역할을 보완하도록 구성했습니다"처럼 배정 의도를 드러낸다.
     - 학생별 경험 목록, 스택 목록, 구현 기능 목록을 나열하지 않는다. 한 학생당 대표 능력 하나만 고른다.
     - 기술 스택은 꼭 필요할 때만 카드당 1~2개 사용한다.
     - 현재 팀원이 아닌 학생 이름은 절대 언급하지 않는다.
     - "각 구성원의 소통, 책임감, 협업, 유연성 등 성격 성향이 고르게 분포되어", "협업 성향이 안정적인 팀" 같은 일반 템플릿 문장을 쓰지 않는다.
-    - matching_evidence에 없는 협업 안정성, 소통 안정성, 책임감 안정성은 새로 만들어 쓰지 않는다.
-    - member_profiles의 response_reliability가 LOW인 학생은 성향 점수를 강한 배정 근거로 쓰지 않는다. 필요하면 "설문 응답 성향 정보는 참고 수준으로 활용하고 구현 경험과 희망 직군을 중심으로 배치했습니다."처럼 완곡하게 설명한다.
+    - 배정 근거에 없는 협업 안정성, 소통 안정성, 책임감 안정성은 새로 만들어 쓰지 않는다.
+    - 팀원별 참고 정보의 설문 응답 신뢰도가 LOW인 학생은 성향 점수를 강한 배정 근거로 쓰지 않는다. 필요하면 "설문 응답 성향 정보는 참고 수준으로 활용하고 구현 경험과 희망 직군을 중심으로 배치했습니다."처럼 완곡하게 설명한다.
     - 숫자 점수는 되도록 쓰지 말고 "소통이 낮은 편", "책임감이 높은 편", "구현 경험이 풍부한 편"처럼 자연어로 표현한다.
     - reason은 reason_cards의 모든 description을 공백으로 이어 붙여 작성한다.
 
@@ -2889,8 +3033,12 @@ def parallelization_reason_cards_batch(
     for team in teams:
         fixed_team = dict(team)
         generated = cards_by_team.get(fixed_team.get("team_name"), {})
-        fixed_team["reason_cards"] = generated.get("reason_cards") or []
-        fixed_team["reason"] = generated.get("reason", "")
+        cards = sanitize_reason_cards(generated.get("reason_cards"))
+        fixed_team["reason_cards"] = cards
+        fixed_team["reason"] = sanitize_reason_card_text(
+            " ".join(card["description"] for card in cards)
+            or generated.get("reason")
+        )
         fixed_teams.append(fixed_team)
 
     return fixed_teams
@@ -2944,8 +3092,12 @@ def generate_final_reason_cards(final_teams, analyzed_students):
     for team in get_candidate_teams(final_teams):
         fixed_team = dict(team)
         generated = cards_by_team.get(fixed_team.get("team_name"), {})
-        fixed_team["reason_cards"] = generated.get("reason_cards") or []
-        fixed_team["reason"] = generated.get("reason", "")
+        cards = sanitize_reason_cards(generated.get("reason_cards"))
+        fixed_team["reason_cards"] = cards
+        fixed_team["reason"] = sanitize_reason_card_text(
+            " ".join(card["description"] for card in cards)
+            or generated.get("reason")
+        )
         fixed_teams.append(fixed_team)
 
     return fixed_teams
@@ -3028,12 +3180,24 @@ def finalize_node(state: MatchingState) -> Dict[str, Any]:
         on_batch_complete=lambda teams: emit_matching_progress(state, "team_ready", teams),
     )
     llm_result = state.get("llm_result", {})
+    request_errors = (
+        balance_result.get("algorithm_result", {}).get("request_errors", [])
+        if isinstance(balance_result, dict)
+        else []
+    )
+    validation_notes = llm_result.get("validation_notes", "")
+    if request_errors:
+        validation_notes = (
+            f"{validation_notes} 사용자 요청 검증 결과: {'; '.join(request_errors)}"
+        ).strip()
 
     final_result = {
         "final_teams": final_teams,
         "changed": llm_result.get("changed", False),
         "change_summary": llm_result.get("change_summary", ""),
-        "validation_notes": llm_result.get("validation_notes", ""),
+        "validation_notes": validation_notes,
+        "request_errors": request_errors,
+        "request_verified": not request_errors,
         "adjustment_history": state.get("adjustment_history", []),
         "preference_rejections": build_preference_rejections(
             get_candidate_teams(final_teams),
@@ -3554,6 +3718,30 @@ def validate_regeneration_constraints(
                 })
         if class_concentrations:
             warnings.append(f"같은 반 또는 같은 번호 학생이 일부 팀에 겹칩니다: {class_concentrations}")
+
+    if constraints.get("distribute_roles"):
+        student_lookup = build_student_lookup(analyzed_students)
+        role_team_indexes: Dict[str, set] = {}
+        role_totals: Dict[str, int] = {}
+        for team_index, team in enumerate(get_candidate_teams(candidate_teams)):
+            for name in get_member_names(team):
+                student = student_lookup.get(name, {})
+                role_group = student.get("role_group") or get_role_group(student.get("role"))
+                role_team_indexes.setdefault(role_group, set()).add(team_index)
+                role_totals[role_group] = role_totals.get(role_group, 0) + 1
+
+        team_count = max(1, len(get_candidate_teams(candidate_teams)))
+        for role_group, total in role_totals.items():
+            if total < 2:
+                continue
+            expected_team_count = min(total, team_count)
+            actual_team_count = len(role_team_indexes.get(role_group, set()))
+            if actual_team_count < expected_team_count:
+                errors.append(
+                    f"사용자가 역할군 분산을 요청했지만 {role_group} 역할이 "
+                    f"{actual_team_count}개 팀에만 배치되었습니다. "
+                    f"최소 {expected_team_count}개 팀으로 분산해야 합니다."
+                )
 
     return {
         "errors": errors,
