@@ -170,6 +170,44 @@ class MatchingStreamTest(unittest.TestCase):
             matching_type="HACKATHON",
         )
 
+    def test_capstone_stream_emits_teams_and_saves_capstone_result(self):
+        students = build_students()
+        ready = build_team(
+            "역할이 연결됩니다.",
+            "협업 규칙이 필요합니다.",
+            [{"title": "역할 연결", "description": "두 역할의 구현 흐름을 연결했습니다."}],
+        )
+        result = build_result(ready)
+
+        def fake_workflow(**kwargs):
+            callback = kwargs["progress_callback"]
+            callback("team_preview", [ready])
+            callback("team_update", [ready])
+            callback("team_ready", [ready])
+            return result
+
+        with (
+            patch.object(analysis, "get_analyze_stu", return_value=students),
+            patch.object(workflow, "run_workflow", side_effect=fake_workflow),
+            patch.object(api, "save_matching_result") as save_result,
+        ):
+            response = api.stream_matching(
+                {"students": students},
+                matching_job_id="job-grade-3-stream",
+            )
+            events = parse_events(asyncio.run(read_stream(response)))
+
+        self.assertEqual("INITIAL", events[0]["data"]["mode"])
+        self.assertEqual("completed", events[-1]["event"])
+        self.assertEqual(
+            ["team_preview", "team_update", "team_ready"],
+            [event["event"] for event in events if event["event"].startswith("team_")],
+        )
+        save_result.assert_called_once_with(
+            workflow.build_public_workflow_result(result),
+            matching_type="CAPSTONE",
+        )
+
     def test_regeneration_stream_uses_saved_teams_and_capstone_regeneration(self):
         students = build_students()
         ready = build_team(

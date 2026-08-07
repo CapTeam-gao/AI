@@ -744,6 +744,7 @@ def create_team_progress_callback(
 
 def run_capstone_stream_job(
     mode: str,
+    matching_type: str,
     request_students: Optional[List[Dict[str, Any]]],
     stored_students: Optional[List[Dict[str, Any]]],
     current_teams: Optional[List[Dict[str, Any]]],
@@ -790,7 +791,7 @@ def run_capstone_stream_job(
         progress_callback(event_type, final_teams)
 
     set_stage("SAVING")
-    save_matching_result(build_public_workflow_result(result), matching_type="HACKATHON")
+    save_matching_result(build_public_workflow_result(result), matching_type=matching_type)
     emit("completed", {"result": build_team_summary(result)})
 
 
@@ -961,6 +962,32 @@ def run_matching(payload: Any = Body(default=None)):
     return build_team_summary(result)
 
 
+@app.post("/matching/run/stream")
+def stream_matching(
+    payload: Any = Body(default=None),
+    matching_job_id: str = Header(..., alias="X-Matching-Job-Id"),
+):
+    job_id = normalize_stream_job_id(matching_job_id)
+    matching_request = parse_matching_request(payload)
+    request_students = parse_stream_students(payload, required=True)
+    prompt = matching_request["prompt"]
+
+    return create_matching_stream_response(
+        job_id=job_id,
+        mode="REGENERATE" if prompt else "INITIAL",
+        worker=lambda emit, set_stage: run_capstone_stream_job(
+            mode="REGENERATE" if prompt else "INITIAL",
+            matching_type="CAPSTONE",
+            request_students=request_students,
+            stored_students=None,
+            current_teams=matching_request["current_teams"],
+            prompt=prompt,
+            emit=emit,
+            set_stage=set_stage,
+        ),
+    )
+
+
 @app.post("/matching/hackathon/run")
 # 백엔드 호환을 위해 해커톤 URL을 유지하되 캡스톤 기준으로 팀을 생성한다.
 # 결과는 HACKATHON 저장 영역에 따로 보관해 일반 CAPSTONE 캐시를 덮어쓰지 않는다.
@@ -1001,6 +1028,7 @@ def stream_hackathon_matching(
         mode="INITIAL",
         worker=lambda emit, set_stage: run_capstone_stream_job(
             mode="INITIAL",
+            matching_type="HACKATHON",
             request_students=request_students,
             stored_students=None,
             current_teams=None,
@@ -1092,6 +1120,7 @@ def stream_regenerate_hackathon_matching(
         mode="REGENERATE",
         worker=lambda emit, set_stage: run_capstone_stream_job(
             mode="REGENERATE",
+            matching_type="HACKATHON",
             request_students=request_students,
             stored_students=saved_result.get("analyzed_students", []),
             current_teams=current_teams,
