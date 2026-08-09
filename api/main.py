@@ -1,12 +1,15 @@
 #총인원, 팀이름, 직군별 사람수, 팀장, 학생당 스택점수 제일 높은거 2개, 팀 배정 이유,팀마다 강점약점, 학생마다 skill_level : 상/중상/중/중하/하
 #팀 재생성 프롬포트 넣어서 팀 재생성 누르면 가능하도록 최종 팀에서 재생성 프롬포트넣어서 llm이 수정하도록 하기.
 import json
+import math
+import os
 import re
 from queue import Empty, Queue
 from pathlib import Path
 from threading import Thread
 from typing import Any, Callable, Dict, List, Optional
 from dotenv import load_dotenv
+import requests
 
 from fastapi import Body, FastAPI, Header, HTTPException
 from fastapi.responses import StreamingResponse
@@ -25,10 +28,95 @@ from capteam_traits import (
 BASE_DIR = Path(__file__).resolve().parents[1]
 MATCHING_OUTPUT_PATH = BASE_DIR / "data/student_analysis_data/matching_output.json"
 
+load_dotenv(BASE_DIR / ".env")
+
 app = FastAPI(title="CapTeam Matching API")
 
 SSE_HEARTBEAT_SECONDS = 15
 STREAM_END = object()
+
+
+def _positive_env_int(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.getenv(name, str(default))))
+    except (TypeError, ValueError):
+        return default
+
+
+def _total_matching_batches(total_teams: int) -> int:
+    """강점/약점 단계와 배정 이유 단계의 전체 배치 수를 계산한다."""
+    if total_teams <= 0:
+        return 0
+
+    analysis_batch_size = _positive_env_int("FINAL_ANALYSIS_BATCH_SIZE", 6)
+    reason_batch_size = _positive_env_int("FINAL_REASON_BATCH_SIZE", 6)
+    return math.ceil(total_teams / analysis_batch_size) + math.ceil(
+        total_teams / reason_batch_size
+    )
+
+
+def create_batch_completion_callback(
+    job_id: Optional[str],
+    analyzed_students: List[Dict[str, Any]],
+) -> Optional[Callable[[str, List[Dict[str, Any]]], None]]:
+    """워크플로우 배치 완료를 백엔드 내부 API로 전달한다.
+
+    백엔드가 호출하는 일반 /matching/run 경로에서도 같은 콜백을 사용한다.
+    콜백 실패가 AI 매칭 전체 실패로 이어지지 않도록 호출부에서 예외를 로그만 남기고
+    계속 진행한다.
+    """
+    normalized_job_id = str(job_id or "").strip()
+    backend_base_url = str(os.getenv("BACKEND_BASE_URL") or "").strip().rstrip("/")
+    internal_api_key = str(os.getenv("INTERNAL_MATCHING_API_KEY") or "").strip()
+
+    if not normalized_job_id or not backend_base_url or not internal_api_key:
+        return None
+
+    state = {
+        "total_teams": 0,
+        "batch_index": 0,
+    }
+
+    def on_progress(event_type: str, teams: List[Dict[str, Any]]) -> None:
+        if event_type == "team_preview":
+            state["total_teams"] = len(teams or [])
+            return
+
+        if event_type not in {"team_update", "team_ready"} or not teams:
+            return
+
+        total_teams = state["total_teams"] or len(teams)
+        callback_teams = [
+            build_stream_team_summary(team, analyzed_students)
+            for team in teams
+        ]
+        callback_teams = [team for team in callback_teams if team]
+        if not callback_teams:
+            return
+
+        try:
+            response = requests.post(
+                f"{backend_base_url}/internal/matching/jobs/{normalized_job_id}/batch-complete",
+                headers={
+                    "X-Internal-Api-Key": internal_api_key,
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "batch_index": state["batch_index"],
+                    "total_batches": _total_matching_batches(total_teams),
+                    "teams": callback_teams,
+                },
+                timeout=10,
+            )
+            response.raise_for_status()
+            state["batch_index"] += 1
+        except requests.RequestException as error:
+            print(
+                "백엔드 배치 완료 콜백 실패: "
+                f"{type(error).__name__}: {error}"
+            )
+
+    return on_progress
 
 
 # data에서 여러 후보 key 중 처음 존재하는 값을 반환한다.
@@ -962,7 +1050,10 @@ def run_analysis(students: Optional[List[Dict[str, Any]]] = Body(default=None)):
 @app.post("/matching/run")
 # 요청 학생이 있으면 재분석한 뒤 팀 매칭 워크플로우를 새로 실행하는 API다.
 # force_rematch=True로 캐시를 무시하고 새 추천안을 만든 뒤 요약 응답을 반환한다.
-def run_matching(payload: Any = Body(default=None)):
+def run_matching(
+    payload: Any = Body(default=None),
+    matching_job_id: Optional[str] = Header(default=None, alias="X-Matching-Job-Id"),
+):
     from student_analysis.analysis_llm import get_analyze_stu
     from matching_student.workflow_matching_student import run_regenerate_workflow, run_workflow #open_ai_api로 할때 이거 밑에 주석치고 이거하셈
     # from matching_student.upstage_matching import run_regenerate_workflow, run_workflow
@@ -972,16 +1063,26 @@ def run_matching(payload: Any = Body(default=None)):
     analyzed_students = None
     if request_students is not None:
         analyzed_students = get_analyze_stu(request_students)
+    callback_students = analyzed_students or load_matching_output().get("analyzed_students", [])
+    batch_completion_callback = create_batch_completion_callback(
+        matching_job_id,
+        callback_students,
+    )
 
     if matching_request["prompt"]:
         result = run_regenerate_workflow(
             prompt=matching_request["prompt"],
             current_teams=matching_request["current_teams"],
             analyzed_students=analyzed_students,
+            progress_callback=batch_completion_callback,
         )
         return build_team_summary(result)
 
-    result = run_workflow(force_rematch=True, analyzed_students=analyzed_students)
+    result = run_workflow(
+        force_rematch=True,
+        analyzed_students=analyzed_students,
+        progress_callback=batch_completion_callback,
+    )
     return build_team_summary(result)
 
 
@@ -1157,7 +1258,10 @@ def stream_regenerate_hackathon_matching(
 @app.post("/matching/regenerate")
 # 사용자가 입력한 재생성 프롬프트로 현재 추천안을 다시 조정하는 API다.
 # prompt, current_teams, 선택적 students를 받아 재생성 결과 요약을 반환한다.
-def regenerate_matching(payload: Optional[Dict[str, Any]] = Body(default=None)):
+def regenerate_matching(
+    payload: Optional[Dict[str, Any]] = Body(default=None),
+    matching_job_id: Optional[str] = Header(default=None, alias="X-Matching-Job-Id"),
+):
     from student_analysis.analysis_llm import get_analyze_stu
     from matching_student.workflow_matching_student import run_regenerate_workflow
 
@@ -1173,12 +1277,18 @@ def regenerate_matching(payload: Optional[Dict[str, Any]] = Body(default=None)):
 
     request_students = normalize_request_students(payload.get("students"))
     analyzed_students = get_analyze_stu(request_students) if request_students is not None else None
+    callback_students = analyzed_students or load_matching_output().get("analyzed_students", [])
+    batch_completion_callback = create_batch_completion_callback(
+        matching_job_id,
+        callback_students,
+    )
 
     try:
         result = run_regenerate_workflow(
             prompt=prompt,
             current_teams=payload.get("current_teams") or payload.get("currentTeams"),
             analyzed_students=analyzed_students,
+            progress_callback=batch_completion_callback,
         )
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error

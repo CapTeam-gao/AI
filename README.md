@@ -100,6 +100,11 @@ AI 서버는 FastAPI 기반으로 구성되어 있으며, 주요 엔드포인트
 - `POST /matching/hackathon/run/stream`
 - `POST /matching/hackathon/regenerate/stream`
 
+백엔드가 `X-Matching-Job-Id` 헤더를 함께 보내면 캡스톤 매칭도 배치 완료마다
+`POST {BACKEND_BASE_URL}/internal/matching/jobs/{jobId}/batch-complete`를 호출합니다.
+이때 `X-Internal-Api-Key`는 `INTERNAL_MATCHING_API_KEY` 환경변수 값이며 백엔드와 AI 서버에
+동일하게 설정해야 합니다. 로컬 예시는 `.env.example`에 있습니다.
+
 ### 팀 매칭 SSE 스트림
 
 스트림 API는 기존 해커톤 호환 요청 본문을 그대로 사용하며, 실제 팀 생성과 재생성은 캡스톤 매칭 워크플로우로 처리합니다. 요청에는 백엔드 작업 ID를 `X-Matching-Job-Id` 헤더로 전달해야 합니다.

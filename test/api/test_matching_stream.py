@@ -5,7 +5,7 @@ import sys
 import unittest
 from pathlib import Path
 from threading import Event
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from fastapi.testclient import TestClient
 
 
@@ -93,6 +93,92 @@ def parse_events(stream_text):
 
 
 class MatchingStreamTest(unittest.TestCase):
+    def test_batch_completion_callback_posts_public_team_shape(self):
+        callback_response = Mock()
+        students = build_students()
+
+        with patch.dict(
+            os.environ,
+            {
+                "BACKEND_BASE_URL": "http://backend.test/",
+                "INTERNAL_MATCHING_API_KEY": "test-key",
+                "FINAL_ANALYSIS_BATCH_SIZE": "1",
+                "FINAL_REASON_BATCH_SIZE": "1",
+            },
+        ), patch.object(api.requests, "post", return_value=callback_response) as post:
+            callback = api.create_batch_completion_callback("job-callback-1", students)
+            team = build_team(
+                "역할이 연결됩니다.",
+                "검토가 필요합니다.",
+                [{"title": "역할 연결", "description": "구현 흐름을 연결했습니다."}],
+            )
+            callback("team_preview", [team])
+            callback("team_update", [team])
+
+        post.assert_called_once()
+        request = post.call_args.kwargs
+        self.assertEqual(
+            "http://backend.test/internal/matching/jobs/job-callback-1/batch-complete",
+            post.call_args.args[0],
+        )
+        self.assertEqual("test-key", request["headers"]["X-Internal-Api-Key"])
+        self.assertEqual(0, request["json"]["batch_index"])
+        self.assertEqual(2, request["json"]["total_batches"])
+        self.assertEqual(
+            {
+                "team_name",
+                "total_people",
+                "role_counts",
+                "leader",
+                "matching_reason",
+                "reason_cards",
+                "strengths",
+                "weaknesses",
+                "skill_level_counts",
+                "members",
+            },
+            set(request["json"]["teams"][0]),
+        )
+
+    def test_blocking_regenerate_route_passes_job_callback_to_workflow(self):
+        students = build_students()
+        callback = Mock()
+        result = build_result()
+
+        with (
+            patch.object(analysis, "get_analyze_stu", return_value=students),
+            patch.object(workflow, "run_regenerate_workflow", return_value=result) as regenerate,
+            patch.object(api, "create_batch_completion_callback", return_value=callback) as callback_factory,
+            patch.object(api, "build_team_summary", return_value={}),
+        ):
+            api.regenerate_matching(
+                {"prompt": "현재 팀을 유지하고 설명만 보완해줘", "students": students},
+                matching_job_id="job-blocking-regenerate",
+            )
+
+        callback_factory.assert_called_once_with("job-blocking-regenerate", students)
+        self.assertIs(regenerate.call_args.kwargs["progress_callback"], callback)
+        self.assertEqual("현재 팀을 유지하고 설명만 보완해줘", regenerate.call_args.kwargs["prompt"])
+
+    def test_blocking_run_route_passes_job_callback_to_workflow(self):
+        students = build_students()
+        callback = Mock()
+        result = build_result()
+
+        with (
+            patch.object(analysis, "get_analyze_stu", return_value=students),
+            patch.object(workflow, "run_workflow", return_value=result) as run_workflow,
+            patch.object(api, "create_batch_completion_callback", return_value=callback) as callback_factory,
+            patch.object(api, "build_team_summary", return_value={}),
+        ):
+            api.run_matching(
+                {"students": students},
+                matching_job_id="job-blocking-run",
+            )
+
+        callback_factory.assert_called_once_with("job-blocking-run", students)
+        self.assertIs(run_workflow.call_args.kwargs["progress_callback"], callback)
+
     def test_stream_route_requires_matching_job_header_before_starting_worker(self):
         client = TestClient(api.app)
         response = client.post(
