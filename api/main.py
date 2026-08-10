@@ -160,6 +160,14 @@ def build_analysis_response_result(result: Dict[str, Any]) -> Dict[str, Any]:
         or result.get("strength")
         or ""
     )
+    analysis_status = str(result.get("analysis_status") or "SUCCESS").strip().upper()
+    if analysis_status not in {"SUCCESS", "FAILED"}:
+        analysis_status = "FAILED"
+    if analysis_status == "SUCCESS" and (
+        not str(analysis_result).strip() or not str(skill_level or "").strip()
+    ):
+        analysis_status = "FAILED"
+        analysis_result = "분석 응답에 필수 결과가 누락되었습니다."
     return {
         **result,
         "user_id": (
@@ -170,6 +178,7 @@ def build_analysis_response_result(result: Dict[str, Any]) -> Dict[str, Any]:
         ),
         "analysis_result": analysis_result,
         "student_level": to_backend_student_level(skill_level),
+        "analysis_status": analysis_status,
     }
 
 
@@ -1040,6 +1049,20 @@ def run_analysis(students: Optional[List[Dict[str, Any]]] = Body(default=None)):
         force_reanalyze=True,
     )
     response_results = [build_analysis_response_result(result) for result in results]
+    failed_results = [
+        result
+        for result in response_results
+        if result.get("analysis_status") == "FAILED"
+    ]
+    if failed_results:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "status": "FAILED",
+                "message": "학생 설문 분석을 완료하지 못했습니다.",
+                "results": response_results,
+            },
+        )
     return {
         "status": "ok",
         "total_students": len(results),
@@ -1055,7 +1078,11 @@ def run_matching(
     matching_job_id: Optional[str] = Header(default=None, alias="X-Matching-Job-Id"),
 ):
     from student_analysis.analysis_llm import get_analyze_stu
-    from matching_student.workflow_matching_student import run_regenerate_workflow, run_workflow #open_ai_api로 할때 이거 밑에 주석치고 이거하셈
+    from matching_student.workflow_matching_student import (
+        FinalAssignmentValidationError,
+        run_regenerate_workflow,
+        run_workflow,
+    ) #open_ai_api로 할때 이거 밑에 주석치고 이거하셈
     # from matching_student.upstage_matching import run_regenerate_workflow, run_workflow
 
     matching_request = parse_matching_request(payload)
@@ -1078,11 +1105,17 @@ def run_matching(
         )
         return build_team_summary(result)
 
-    result = run_workflow(
-        force_rematch=True,
-        analyzed_students=analyzed_students,
-        progress_callback=batch_completion_callback,
-    )
+    try:
+        result = run_workflow(
+            force_rematch=True,
+            analyzed_students=analyzed_students,
+            progress_callback=batch_completion_callback,
+        )
+    except FinalAssignmentValidationError as error:
+        raise HTTPException(
+            status_code=422,
+            detail={"status": "VALIDATION_FAILED", "message": str(error)},
+        ) from error
     return build_team_summary(result)
 
 

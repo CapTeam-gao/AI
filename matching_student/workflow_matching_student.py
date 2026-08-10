@@ -1,4 +1,5 @@
 from typing import Any, Callable, List, TypedDict, Dict, Optional
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import copy
 import os
@@ -1834,6 +1835,71 @@ def merge_balance_results(algorithm_result, llm_result):
 
 MAX_ITERATION = 3
 
+
+class FinalAssignmentValidationError(ValueError):
+    """최종 팀 결과가 학생 1인 1팀 계약을 위반했을 때 발생한다."""
+
+
+def _final_member_identifier(member: Any) -> str:
+    if isinstance(member, dict):
+        return str(
+            member.get("user_id")
+            or member.get("userId")
+            or member.get("student_id")
+            or member.get("studentId")
+            or member.get("name")
+            or member.get("studentName")
+            or member.get("userName")
+            or ""
+        ).strip()
+    return str(member or "").strip()
+
+
+def validate_final_team_assignments(
+    final_teams: List[Dict[str, Any]],
+    analyzed_students: List[Dict[str, Any]],
+) -> None:
+    """최종 결과의 학생 중복·누락·미식별 학생을 저장 직전에 검증한다."""
+    expected_by_id = {}
+    name_to_ids = {}
+    for student in analyzed_students or []:
+        user_id = str(
+            student.get("user_id")
+            or student.get("userId")
+            or student.get("student_id")
+            or student.get("studentId")
+            or ""
+        ).strip()
+        name = str(student.get("name") or student.get("studentName") or "").strip()
+        if user_id:
+            expected_by_id[user_id] = student
+        if name and user_id:
+            name_to_ids.setdefault(name, set()).add(user_id)
+
+    assigned_ids = []
+    unknown_members = []
+    for team in final_teams or []:
+        for member in team.get("members", []) or []:
+            identifier = _final_member_identifier(member)
+            if identifier in expected_by_id:
+                assigned_ids.append(identifier)
+                continue
+            matching_ids = name_to_ids.get(identifier, set())
+            if len(matching_ids) == 1:
+                assigned_ids.append(next(iter(matching_ids)))
+            else:
+                unknown_members.append(identifier or "<empty>")
+
+    counts = Counter(assigned_ids)
+    duplicate_ids = sorted(user_id for user_id, count in counts.items() if count > 1)
+    missing_ids = sorted(set(expected_by_id) - set(assigned_ids))
+    if duplicate_ids or missing_ids or unknown_members:
+        raise FinalAssignmentValidationError(
+            "최종 팀 배정 검증 실패: "
+            f"중복 학생={duplicate_ids}, 누락 학생={missing_ids}, "
+            f"식별 불가 학생={sorted(unknown_members)}"
+        )
+
 # 최종 fallback이 필요한 치명적 배정 오류인지 확인한다.
 # 선호팀원 미반영은 제외하고 누락/중복/없는 이름만 True로 본다.
 def has_structural_assignment_error(balance_result: Dict[str, Any]) -> bool:
@@ -3179,6 +3245,7 @@ def finalize_node(state: MatchingState) -> Dict[str, Any]:
         analyzed_students,
         on_batch_complete=lambda teams: emit_matching_progress(state, "team_ready", teams),
     )
+    validate_final_team_assignments(final_teams, analyzed_students)
     llm_result = state.get("llm_result", {})
     request_errors = (
         balance_result.get("algorithm_result", {}).get("request_errors", [])
@@ -3968,6 +4035,8 @@ def build_algorithm_only_result(state: MatchingState, error: Exception) -> Match
             "reason": "",
         })
 
+    validate_final_team_assignments(final_teams, state.get("analyzed_students", []))
+
     return {
         **state,
         "teams": teams,
@@ -4009,6 +4078,9 @@ def run_workflow(
     )
     try:
         result = app.invoke(initial_state)
+    except FinalAssignmentValidationError:
+        # 최종 중복/누락 결과는 fallback으로 성공 처리하지 않고 호출자에게 실패로 전달한다.
+        raise
     except Exception as error:
         print(f"LLM 매칭 실패. 규칙 기반 팀 배정으로 fallback합니다: {error}")
         result = build_algorithm_only_result(initial_state, error)
