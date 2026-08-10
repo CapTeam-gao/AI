@@ -989,6 +989,7 @@ def create_team_node(state: MatchingState) -> Dict[str, Any]:
     # 바뀐 값만 {"teams": teams} 형태로 반환하면 LangGraph가 state에 합쳐준다.
     analyzed_students = state.get("analyzed_students", []) #state에서 analyzed_students 값 받아서 
     teams = create_initial_teams(analyzed_students) 
+    emit_matching_progress(state, "collaboration_matching", teams)
 
     return {
         "teams": teams,
@@ -3127,8 +3128,10 @@ def run_parallel_reason_cards(
         worker_fn=parallelization_reason_cards_batch,
         worker_env_name="FINAL_REASON_WORKERS",
         batch_env_name="FINAL_REASON_BATCH_SIZE",
-        default_workers=3,
-        default_batch_size=6,
+        # 1팀의 배정 이유가 끝나는 즉시 콜백을 보낼 수 있도록 팀별로 순차 처리한다.
+        # 여러 팀을 한 배치/병렬로 처리하면 첫 폴링 전에 모든 팀이 함께 저장된다.
+        default_workers=1,
+        default_batch_size=1,
         error_fields={
             "reason_cards": [],
             "reason": "",
@@ -3216,6 +3219,7 @@ def finalize_node(state: MatchingState) -> Dict[str, Any]:
         finalized_by = "manual_finalize"
 
     candidate_teams = state.get("llm_result") or state.get("teams", [])
+    emit_matching_progress(state, "finalizing", candidate_teams)
     has_assignment_error = has_structural_assignment_error(balance_result)
 
     if finalized_by == "max_iteration" and has_assignment_error:
@@ -3945,6 +3949,11 @@ def run_regenerate_workflow(
         current_teams=current_teams,
     )
     state["progress_callback"] = progress_callback
+    emit_matching_progress(
+        state,
+        "collaboration_matching",
+        state.get("teams") or state.get("regeneration_seed_teams", []),
+    )
 
     while state.get("iteration_count", 0) < MAX_ITERATION:
         state = {

@@ -93,6 +93,29 @@ def parse_events(stream_text):
 
 
 class MatchingStreamTest(unittest.TestCase):
+    def test_batch_completion_callback_posts_progress_stage(self):
+        callback_response = Mock()
+
+        with patch.dict(
+            os.environ,
+            {
+                "BACKEND_BASE_URL": "http://backend.test/",
+                "INTERNAL_MATCHING_API_KEY": "test-key",
+            },
+        ), patch.object(api.requests, "post", return_value=callback_response) as post:
+            callback = api.create_batch_completion_callback(
+                "job-stage-1",
+                build_students(),
+            )
+            callback("collaboration_matching", [])
+
+        post.assert_called_once()
+        self.assertEqual(
+            "http://backend.test/internal/matching/jobs/job-stage-1/stage",
+            post.call_args.args[0],
+        )
+        self.assertEqual(2, post.call_args.kwargs["json"]["progress_step"])
+
     def test_batch_completion_callback_posts_public_team_shape(self):
         callback_response = Mock()
         students = build_students()
@@ -111,6 +134,8 @@ class MatchingStreamTest(unittest.TestCase):
                 [{"title": "역할 연결", "description": "구현 흐름을 연결했습니다."}],
             )
             callback("team_preview", [team])
+            post.assert_not_called()
+            callback("team_ready", [team])
 
         post.assert_called_once()
         request = post.call_args.kwargs
