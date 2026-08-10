@@ -3190,10 +3190,11 @@ def emit_matching_progress(
     teams: List[Dict[str, Any]],
 ) -> None:
     callback = state.get("progress_callback")
-    if not callable(callback) or not teams:
+    normalized_teams = get_candidate_teams(teams)
+    if not callable(callback) or not normalized_teams:
         return
     try:
-        callback(event_type, copy.deepcopy(teams))
+        callback(event_type, copy.deepcopy(normalized_teams))
     except Exception as error:
         print(f"팀 매칭 스트림 콜백 실패: {type(error).__name__}: {error}")
 
