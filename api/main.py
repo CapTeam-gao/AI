@@ -53,8 +53,33 @@ def create_batch_completion_callback(
         return None
 
     state = {"total_teams": 0, "sent_team_names": set()}
+    stage_by_event = {
+        "role_balancing": 1,
+        "collaboration_matching": 2,
+        "finalizing": 3,
+    }
 
     def on_progress(event_type: str, teams: List[Dict[str, Any]]) -> None:
+        progress_step = stage_by_event.get(event_type)
+        if progress_step is not None:
+            try:
+                response = requests.post(
+                    f"{backend_base_url}/internal/matching/jobs/{normalized_job_id}/stage",
+                    headers={
+                        "X-Internal-Api-Key": internal_api_key,
+                        "Content-Type": "application/json",
+                    },
+                    json={"progress_step": progress_step},
+                    timeout=10,
+                )
+                response.raise_for_status()
+            except requests.RequestException as error:
+                print(
+                    "백엔드 진행 단계 콜백 실패: "
+                    f"{type(error).__name__}: {error}, step={progress_step}"
+                )
+            return
+
         # 팀 구성이 확정된 직후의 preview를 팀 단위로 저장한다.
         # team_ready까지 기다리면 모든 설명 생성이 끝난 뒤 콜백이 몰려
         # 프론트가 첫 팀 도착을 놓칠 수 있다.
@@ -1081,6 +1106,8 @@ def run_matching(
         matching_job_id,
         callback_students,
     )
+    if batch_completion_callback:
+        batch_completion_callback("role_balancing", [])
 
     if matching_request["prompt"]:
         result = run_regenerate_workflow(
@@ -1301,6 +1328,8 @@ def regenerate_matching(
         matching_job_id,
         callback_students,
     )
+    if batch_completion_callback:
+        batch_completion_callback("role_balancing", [])
 
     try:
         result = run_regenerate_workflow(

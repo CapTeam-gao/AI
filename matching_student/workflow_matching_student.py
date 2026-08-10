@@ -989,6 +989,7 @@ def create_team_node(state: MatchingState) -> Dict[str, Any]:
     # 바뀐 값만 {"teams": teams} 형태로 반환하면 LangGraph가 state에 합쳐준다.
     analyzed_students = state.get("analyzed_students", []) #state에서 analyzed_students 값 받아서 
     teams = create_initial_teams(analyzed_students) 
+    emit_matching_progress(state, "collaboration_matching", teams)
 
     return {
         "teams": teams,
@@ -3216,6 +3217,7 @@ def finalize_node(state: MatchingState) -> Dict[str, Any]:
         finalized_by = "manual_finalize"
 
     candidate_teams = state.get("llm_result") or state.get("teams", [])
+    emit_matching_progress(state, "finalizing", candidate_teams)
     has_assignment_error = has_structural_assignment_error(balance_result)
 
     if finalized_by == "max_iteration" and has_assignment_error:
@@ -3945,6 +3947,11 @@ def run_regenerate_workflow(
         current_teams=current_teams,
     )
     state["progress_callback"] = progress_callback
+    emit_matching_progress(
+        state,
+        "collaboration_matching",
+        state.get("teams") or state.get("regeneration_seed_teams", []),
+    )
 
     while state.get("iteration_count", 0) < MAX_ITERATION:
         state = {
