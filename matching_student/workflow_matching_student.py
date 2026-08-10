@@ -2849,6 +2849,7 @@ def run_parallel_team_batches(
     batch_size = max(1, int(os.getenv(batch_env_name, str(default_batch_size))))
     batches = chunk_team_batches(teams, batch_size)
     results = [None] * len(batches)
+    next_callback_index = 0
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
@@ -2871,19 +2872,19 @@ def run_parallel_team_batches(
                     }
                     for team in batch
                 ]
-        # 병렬 작업 완료 순서가 아니라 최종 팀 순서대로만 콜백을 보낸다.
-        # 그래야 1팀, 2팀, 3팀이 순서대로 백엔드와 프론트에 도착한다.
-        if on_batch_complete:
-            for batch_result in results:
-                if not batch_result:
-                    continue
-                try:
-                    on_batch_complete(copy.deepcopy(batch_result))
-                except Exception as callback_error:
-                    print(
-                        f"{task_label} 스트림 콜백 실패: "
-                        f"{type(callback_error).__name__}: {callback_error}"
-                    )
+            # 병렬 작업 완료 순서가 아니라 최종 팀 순서대로 콜백을 보낸다.
+            # 앞 배치가 준비된 시점에는 즉시 보내되, 뒤 배치가 먼저 끝나도
+            # 앞 배치가 올 때까지 보류해 1팀, 2팀, 3팀 순서를 보장한다.
+            if on_batch_complete:
+                while next_callback_index < len(results) and results[next_callback_index] is not None:
+                    try:
+                        on_batch_complete(copy.deepcopy(results[next_callback_index]))
+                    except Exception as callback_error:
+                        print(
+                            f"{task_label} 스트림 콜백 실패: "
+                            f"{type(callback_error).__name__}: {callback_error}"
+                        )
+                    next_callback_index += 1
 
     fixed_teams = []
     for batch_result in results:
