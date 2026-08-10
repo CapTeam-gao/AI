@@ -55,16 +55,14 @@ def create_batch_completion_callback(
     state = {"total_teams": 0, "sent_team_names": set()}
 
     def on_progress(event_type: str, teams: List[Dict[str, Any]]) -> None:
-        if event_type == "team_preview":
-            state["total_teams"] = len(teams or [])
+        # 팀 구성이 확정된 직후의 preview를 팀 단위로 저장한다.
+        # team_ready까지 기다리면 모든 설명 생성이 끝난 뒤 콜백이 몰려
+        # 프론트가 첫 팀 도착을 놓칠 수 있다.
+        if event_type != "team_preview" or not teams:
             return
 
-        # 중간 배치 결과는 내부 처리 단계일 뿐이다. 최종 순서가 확정된
-        # team_ready만 팀 하나씩 백엔드에 저장한다.
-        if event_type != "team_ready" or not teams:
-            return
-
-        total_teams = state["total_teams"] or len(teams)
+        state["total_teams"] = len(teams)
+        total_teams = state["total_teams"]
         for team in teams:
             team_name = str(team.get("team_name") or "").strip()
             if not team_name or team_name in state["sent_team_names"]:
@@ -96,7 +94,7 @@ def create_batch_completion_callback(
                     f"{type(error).__name__}: {error}, team={team_name}"
                 )
                 # 앞 팀이 저장되지 않았는데 뒤 팀을 먼저 보내면 화면 순서가 깨진다.
-                # 다음 최종 콜백에서 같은 팀부터 다시 시도할 수 있도록 중단한다.
+                # 재호출 시 같은 팀부터 다시 시도할 수 있도록 중단한다.
                 break
 
     return on_progress
