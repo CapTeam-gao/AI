@@ -30,6 +30,11 @@ services:
       LANGCHAIN_ENDPOINT: ${LANGSMITH_ENDPOINT}
       LANGCHAIN_API_KEY: ${LANGSMITH_API_KEY}
       LANGCHAIN_PROJECT: ${LANGSMITH_PROJECT}
+      # AI 서버가 배치 완료를 전달할 백엔드 주소와 서버 간 인증키입니다.
+      BACKEND_BASE_URL: ${BACKEND_BASE_URL:-http://host.docker.internal:8080}
+      INTERNAL_MATCHING_API_KEY: ${INTERNAL_MATCHING_API_KEY:?INTERNAL_MATCHING_API_KEY is required}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 networks:
   backend_internal:
