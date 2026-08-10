@@ -134,6 +134,8 @@ class MatchingStreamTest(unittest.TestCase):
                 [{"title": "역할 연결", "description": "구현 흐름을 연결했습니다."}],
             )
             callback("team_preview", [team])
+            post.assert_not_called()
+            callback("team_ready", [team])
 
         post.assert_called_once()
         request = post.call_args.kwargs

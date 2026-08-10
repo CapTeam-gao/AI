@@ -3128,8 +3128,10 @@ def run_parallel_reason_cards(
         worker_fn=parallelization_reason_cards_batch,
         worker_env_name="FINAL_REASON_WORKERS",
         batch_env_name="FINAL_REASON_BATCH_SIZE",
-        default_workers=3,
-        default_batch_size=6,
+        # 1팀의 배정 이유가 끝나는 즉시 콜백을 보낼 수 있도록 팀별로 순차 처리한다.
+        # 여러 팀을 한 배치/병렬로 처리하면 첫 폴링 전에 모든 팀이 함께 저장된다.
+        default_workers=1,
+        default_batch_size=1,
         error_fields={
             "reason_cards": [],
             "reason": "",

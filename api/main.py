@@ -80,16 +80,20 @@ def create_batch_completion_callback(
                 )
             return
 
-        # 팀 구성이 확정된 직후의 preview를 팀 단위로 저장한다.
-        # team_ready까지 기다리면 모든 설명 생성이 끝난 뒤 콜백이 몰려
-        # 프론트가 첫 팀 도착을 놓칠 수 있다.
         if isinstance(teams, dict):
             teams = teams.get("final_teams") or teams.get("teams") or []
-        if event_type != "team_preview" or not isinstance(teams, list) or not teams:
+        if not isinstance(teams, list) or not teams:
             return
 
-        state["total_teams"] = len(teams)
-        total_teams = state["total_teams"]
+        # preview에서는 전체 팀 수만 기억하고 저장하지 않는다. 각 팀의 강점·약점과
+        # 배정 이유가 실제로 완성된 team_ready 시점에만 백엔드에 한 팀씩 저장한다.
+        if event_type == "team_preview":
+            state["total_teams"] = len(teams)
+            return
+        if event_type != "team_ready":
+            return
+
+        total_teams = state["total_teams"] or len(teams)
         for team in teams:
             if not isinstance(team, dict):
                 print(f"백엔드 팀 완료 콜백 건너뜀: 잘못된 팀 형식={type(team).__name__}")
