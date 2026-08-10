@@ -2871,9 +2871,14 @@ def run_parallel_team_batches(
                     }
                     for team in batch
                 ]
-            if on_batch_complete and results[index]:
+        # 병렬 작업 완료 순서가 아니라 최종 팀 순서대로만 콜백을 보낸다.
+        # 그래야 1팀, 2팀, 3팀이 순서대로 백엔드와 프론트에 도착한다.
+        if on_batch_complete:
+            for batch_result in results:
+                if not batch_result:
+                    continue
                 try:
-                    on_batch_complete(copy.deepcopy(results[index]))
+                    on_batch_complete(copy.deepcopy(batch_result))
                 except Exception as callback_error:
                     print(
                         f"{task_label} 스트림 콜백 실패: "

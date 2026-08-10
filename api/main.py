@@ -1,7 +1,6 @@
 #총인원, 팀이름, 직군별 사람수, 팀장, 학생당 스택점수 제일 높은거 2개, 팀 배정 이유,팀마다 강점약점, 학생마다 skill_level : 상/중상/중/중하/하
 #팀 재생성 프롬포트 넣어서 팀 재생성 누르면 가능하도록 최종 팀에서 재생성 프롬포트넣어서 llm이 수정하도록 하기.
 import json
-import math
 import os
 import re
 from queue import Empty, Queue
@@ -36,25 +35,6 @@ SSE_HEARTBEAT_SECONDS = 15
 STREAM_END = object()
 
 
-def _positive_env_int(name: str, default: int) -> int:
-    try:
-        return max(1, int(os.getenv(name, str(default))))
-    except (TypeError, ValueError):
-        return default
-
-
-def _total_matching_batches(total_teams: int) -> int:
-    """강점/약점 단계와 배정 이유 단계의 전체 배치 수를 계산한다."""
-    if total_teams <= 0:
-        return 0
-
-    analysis_batch_size = _positive_env_int("FINAL_ANALYSIS_BATCH_SIZE", 6)
-    reason_batch_size = _positive_env_int("FINAL_REASON_BATCH_SIZE", 6)
-    return math.ceil(total_teams / analysis_batch_size) + math.ceil(
-        total_teams / reason_batch_size
-    )
-
-
 def create_batch_completion_callback(
     job_id: Optional[str],
     analyzed_students: List[Dict[str, Any]],
@@ -72,49 +52,52 @@ def create_batch_completion_callback(
     if not normalized_job_id or not backend_base_url or not internal_api_key:
         return None
 
-    state = {
-        "total_teams": 0,
-        "batch_index": 0,
-    }
+    state = {"total_teams": 0, "sent_team_names": set()}
 
     def on_progress(event_type: str, teams: List[Dict[str, Any]]) -> None:
         if event_type == "team_preview":
             state["total_teams"] = len(teams or [])
             return
 
-        if event_type not in {"team_update", "team_ready"} or not teams:
+        # 중간 배치 결과는 내부 처리 단계일 뿐이다. 최종 순서가 확정된
+        # team_ready만 팀 하나씩 백엔드에 저장한다.
+        if event_type != "team_ready" or not teams:
             return
 
         total_teams = state["total_teams"] or len(teams)
-        callback_teams = [
-            build_stream_team_summary(team, analyzed_students)
-            for team in teams
-        ]
-        callback_teams = [team for team in callback_teams if team]
-        if not callback_teams:
-            return
+        for team in teams:
+            team_name = str(team.get("team_name") or "").strip()
+            if not team_name or team_name in state["sent_team_names"]:
+                continue
 
-        try:
-            response = requests.post(
-                f"{backend_base_url}/internal/matching/jobs/{normalized_job_id}/batch-complete",
-                headers={
-                    "X-Internal-Api-Key": internal_api_key,
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "batch_index": state["batch_index"],
-                    "total_batches": _total_matching_batches(total_teams),
-                    "teams": callback_teams,
-                },
-                timeout=10,
-            )
-            response.raise_for_status()
-            state["batch_index"] += 1
-        except requests.RequestException as error:
-            print(
-                "백엔드 배치 완료 콜백 실패: "
-                f"{type(error).__name__}: {error}"
-            )
+            callback_team = build_stream_team_summary(team, analyzed_students)
+            if not callback_team:
+                continue
+
+            try:
+                response = requests.post(
+                    f"{backend_base_url}/internal/matching/jobs/{normalized_job_id}/batch-complete",
+                    headers={
+                        "X-Internal-Api-Key": internal_api_key,
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "batch_index": len(state["sent_team_names"]),
+                        "total_batches": total_teams,
+                        "teams": [callback_team],
+                    },
+                    timeout=10,
+                )
+                response.raise_for_status()
+                state["sent_team_names"].add(team_name)
+            except requests.RequestException as error:
+                print(
+                    "백엔드 팀 완료 콜백 실패: "
+                    f"{type(error).__name__}: {error}, team={team_name}"
+                )
+                # 앞 팀이 저장되지 않았는데 뒤 팀을 먼저 보내면 화면 순서가 깨진다.
+                # 다음 최종 콜백에서 같은 팀부터 다시 시도할 수 있도록 중단한다.
+                break
 
     return on_progress
 

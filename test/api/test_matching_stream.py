@@ -102,8 +102,6 @@ class MatchingStreamTest(unittest.TestCase):
             {
                 "BACKEND_BASE_URL": "http://backend.test/",
                 "INTERNAL_MATCHING_API_KEY": "test-key",
-                "FINAL_ANALYSIS_BATCH_SIZE": "1",
-                "FINAL_REASON_BATCH_SIZE": "1",
             },
         ), patch.object(api.requests, "post", return_value=callback_response) as post:
             callback = api.create_batch_completion_callback("job-callback-1", students)
@@ -114,6 +112,8 @@ class MatchingStreamTest(unittest.TestCase):
             )
             callback("team_preview", [team])
             callback("team_update", [team])
+            self.assertFalse(post.called)
+            callback("team_ready", [team])
 
         post.assert_called_once()
         request = post.call_args.kwargs
@@ -123,7 +123,7 @@ class MatchingStreamTest(unittest.TestCase):
         )
         self.assertEqual("test-key", request["headers"]["X-Internal-Api-Key"])
         self.assertEqual(0, request["json"]["batch_index"])
-        self.assertEqual(2, request["json"]["total_batches"])
+        self.assertEqual(1, request["json"]["total_batches"])
         self.assertEqual(
             {
                 "team_name",
