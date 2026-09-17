@@ -326,6 +326,43 @@ def make_empty_teams(team_capacities):
     ]
     #team_count만큼 팀 생성
 
+
+# 함께 유지해야 하는 역할군을 일반/선호 배치보다 먼저 팀 정원만큼 채운다.
+# game 역할군은 프롬프트 판단이 아니라 초기 알고리즘에서 항상 같은 팀에 우선 배치한다.
+def create_keep_together_role_seeded_teams(student_summaries, team_capacities):
+    teams = make_empty_teams(team_capacities)
+    unassigned = list(student_summaries)
+
+    for role_group in ROLE_GROUPS_TO_KEEP_TOGETHER:
+        role_students = sorted(
+            [student for student in unassigned if student["role_group"] == role_group],
+            key=lambda student: student["score"],
+            reverse=True,
+        )
+
+        # 한 팀에 수용 가능한 만큼 먼저 채워 역할군이 불필요하게 분산되지 않게 한다.
+        while role_students:
+            target_team = max(
+                [
+                    team
+                    for team in teams
+                    if len(team["members"]) < team.get("capacity", 5)
+                ],
+                key=lambda team: (
+                    team.get("capacity", 5) - len(team["members"]),
+                    -len(team["members"]),
+                ),
+            )
+            available_slots = target_team.get("capacity", 5) - len(target_team["members"])
+            group = role_students[:available_slots]
+            for student in group:
+                add_student_to_team(target_team, student)
+                unassigned.remove(student)
+            role_students = role_students[available_slots:]
+
+    return teams, unassigned
+
+
 # 학생 한 명을 현재 팀들 중 어느 팀에 넣을지 선택한다.
 # 선호팀원, 역할 다양성, 인원수, 성향 보완, 팀 총점을 기준으로 가장 적합한 팀을 반환한다.
 def choose_team_for_student(teams, student):
@@ -525,6 +562,12 @@ def optimize_teams_for_preferences(teams, max_passes=20):
 
                 for first_member_index in range(len(first_members)):
                     for second_member_index in range(len(second_members)):
+                        # game 역할군은 초기 배치에서 고정했으므로 선호 최적화 교환으로 다시 분리하지 않는다.
+                        if (
+                            first_members[first_member_index].get("role_group") in ROLE_GROUPS_TO_KEEP_TOGETHER
+                            or second_members[second_member_index].get("role_group") in ROLE_GROUPS_TO_KEEP_TOGETHER
+                        ):
+                            continue
                         candidate_teams = copy.deepcopy(optimized_teams)
                         candidate_teams[first_team_index]["members"][first_member_index], candidate_teams[second_team_index]["members"][second_member_index] = (
                             candidate_teams[second_team_index]["members"][second_member_index],
@@ -596,7 +639,25 @@ def create_initial_teams(analyzed_students, team_size=5, team_count=None):
     ]
 
     has_preferences = any(student.get("preferred_members") for student in student_summaries)
-    if has_preferences:
+    has_keep_together_roles = any(
+        student["role_group"] in ROLE_GROUPS_TO_KEEP_TOGETHER
+        for student in student_summaries
+    )
+    if has_keep_together_roles:
+        teams, unassigned_students = create_keep_together_role_seeded_teams(
+            student_summaries,
+            team_capacities,
+        )
+        # 게임 역할군을 먼저 고정한 뒤, 남은 학생은 기존 팀 선택 규칙으로 배치한다.
+        # 이 규칙 안에는 선호 팀원 보너스가 있어 재생성 로직을 건드리지 않고도 선호를 반영한다.
+        for student in sorted(
+            unassigned_students,
+            key=lambda student: student["score"],
+            reverse=True,
+        ):
+            team = choose_team_for_student(teams, student)
+            add_student_to_team(team, student)
+    elif has_preferences:
         teams = create_preference_seeded_teams(student_summaries, team_capacities)
     else:
         # 점수가 높은 학생부터 배치하되, 함께 배치해야 하는 역할군은 먼저 배치해 자리를 확보한다.
