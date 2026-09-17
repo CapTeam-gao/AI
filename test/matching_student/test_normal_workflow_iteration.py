@@ -4,6 +4,7 @@ from unittest.mock import patch
 from matching_student.workflow_matching_student import (
     MAX_ITERATION,
     build_candidate_quality_score,
+    create_initial_teams,
     evaluate_normal_workflow_node,
     finalize_normal_workflow_node,
     get_adjust_team_prompt_chain,
@@ -34,6 +35,26 @@ def balance_result(*, errors=None, warnings=None, score_gap=0, hard_score_gap=30
 
 
 class NormalWorkflowIterationTest(unittest.TestCase):
+    def test_initial_matching_keeps_game_students_together_even_with_preferences(self):
+        students = [
+            {
+                "name": f"학생{index}",
+                "role": "game" if index < 5 else "frontend",
+                "skill_level": "보통",
+                "stack_score": "Python: 5점",
+                "preferred_members": ["학생9"] if index == 0 else [],
+            }
+            for index in range(10)
+        ]
+
+        teams = create_initial_teams(students)
+        game_counts = [
+            sum(member["role_group"] == "game" for member in team["members"])
+            for team in teams
+        ]
+
+        self.assertIn(5, game_counts)
+
     def test_adjust_prompt_forces_fittable_game_students_into_one_team(self):
         prompt = get_adjust_team_prompt_chain()
         prompt_text = "\n".join(message.prompt.template for message in prompt.messages)
