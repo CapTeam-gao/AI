@@ -81,6 +81,7 @@ jobs:
             --exclude '.venv' \
             --exclude '__pycache__' \
             --exclude '.idea' \
+            --exclude '.DS_Store' \
             -e "ssh -i ~/.ssh/ec2_key -p $EC2_PORT" \
             ./ "$EC2_USERNAME@$EC2_HOST:$DEPLOY_PATH/"
 
@@ -106,6 +107,7 @@ jobs:
           EOF
 
           scp -i ~/.ssh/ec2_key -P "$EC2_PORT" .env.production "$EC2_USERNAME@$EC2_HOST:$DEPLOY_PATH/.env"
+          ssh -i ~/.ssh/ec2_key -p "$EC2_PORT" "$EC2_USERNAME@$EC2_HOST" "chmod 600 '$DEPLOY_PATH/.env'"
 
       - name: Restart Docker Compose services
         run: |
