@@ -140,6 +140,29 @@ AI 서버는 중간 이벤트를 별도로 저장하지 않습니다. 연결 종
 - MySQL
 - Docker / Docker Compose
 
+## EC2 배포
+
+AI는 Backend가 먼저 만든 외부 Docker 네트워크 `backend_internal`에 연결됩니다. 따라서 새 EC2에서는 Backend를 먼저 배포한 다음 AI를 배포해야 합니다.
+
+AI 저장소의 GitHub Actions Secrets에는 다음 값을 등록합니다.
+
+```text
+EC2_HOST, EC2_USER, EC2_PORT, EC2_SSH_KEY
+EC2_DEPLOY_PATH
+UPSTAGE_API_KEY, OPENAI_API_KEY
+LANGSMITH_TRACING, LANGSMITH_ENDPOINT, LANGSMITH_API_KEY, LANGSMITH_PROJECT
+DB_NAME, DB_USER, DB_PASSWORD
+BACKEND_BASE_URL, INTERNAL_MATCHING_API_KEY
+```
+
+`EC2_DEPLOY_PATH`는 생략할 수 있으며 기본값은 `/home/{EC2_USER}/apps/AI`입니다. 핵심 연동값은 다음과 같습니다.
+
+```properties
+BACKEND_BASE_URL=http://gao-backend:8080
+```
+
+`DB_NAME`, `DB_USER`, `DB_PASSWORD`는 Backend 저장소의 `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`와 같아야 하며, `INTERNAL_MATCHING_API_KEY`도 양쪽 저장소에서 같은 값을 사용해야 합니다. 배포 Actions는 `ai-server`가 healthy가 될 때까지 확인하고, 실패하면 최근 컨테이너 로그를 출력합니다.
+
 ## 내가 구현하면서 집중한 부분
 
 이 프로젝트의 AI 파트를 구현하면서 특히 신경 쓴 부분은 아래와 같습니다.

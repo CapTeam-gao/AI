@@ -5,7 +5,7 @@ services:
     container_name: ai-server
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "${AI_BIND_ADDRESS:-127.0.0.1}:${AI_PORT:-8000}:8000"
     networks:
       - default
       - backend_internal
@@ -35,7 +35,19 @@ services:
       INTERNAL_MATCHING_API_KEY: ${INTERNAL_MATCHING_API_KEY:?INTERNAL_MATCHING_API_KEY is required}
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 networks:
   backend_internal:
     external: true
+    name: backend_internal

@@ -8,7 +8,7 @@ on:
 
 concurrency:
   group: deploy-ai-server
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   docker-build-check:
@@ -33,13 +33,18 @@ jobs:
       EC2_USERNAME: ${{ secrets.EC2_USER }}
       EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
 
-      DEPLOY_PATH: ${{ secrets.EC2_DEPLOY_PATH || '/home/ec2-user/gaoAi' }}
+      DEPLOY_PATH: ${{ secrets.EC2_DEPLOY_PATH }}
       UPSTAGE_API_KEY: ${{ secrets.UPSTAGE_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       LANGSMITH_TRACING: ${{ secrets.LANGSMITH_TRACING }}
       LANGSMITH_ENDPOINT: ${{ secrets.LANGSMITH_ENDPOINT }}
       LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
       LANGSMITH_PROJECT: ${{ secrets.LANGSMITH_PROJECT }}
+      DB_NAME: ${{ secrets.DB_NAME }}
+      DB_USER: ${{ secrets.DB_USER }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      BACKEND_BASE_URL: ${{ secrets.BACKEND_BASE_URL }}
+      INTERNAL_MATCHING_API_KEY: ${{ secrets.INTERNAL_MATCHING_API_KEY }}
 
     steps:
       - name: Checkout repository
@@ -53,7 +58,11 @@ jobs:
           test -n "$EC2_SSH_KEY"
           test -n "$UPSTAGE_API_KEY"
           test -n "$OPENAI_API_KEY"
-   
+          test -n "$DB_NAME"
+          test -n "$DB_USER"
+          test -n "$DB_PASSWORD"
+          test -n "$BACKEND_BASE_URL"
+          test -n "$INTERNAL_MATCHING_API_KEY"
 
       - name: Configure SSH
         run: |
@@ -64,6 +73,7 @@ jobs:
 
       - name: Sync project files to EC2
         run: |
+          DEPLOY_PATH="${DEPLOY_PATH:-/home/${EC2_USERNAME}/apps/AI}"
           ssh -i ~/.ssh/ec2_key -p "$EC2_PORT" "$EC2_USERNAME@$EC2_HOST" "mkdir -p '$DEPLOY_PATH'"
           rsync -az \
             --exclude '.git' \
@@ -76,6 +86,7 @@ jobs:
 
       - name: Write production environment file
         run: |
+          DEPLOY_PATH="${DEPLOY_PATH:-/home/${EC2_USERNAME}/apps/AI}"
           cat > .env.production <<EOF
           UPSTAGE_API_KEY=$UPSTAGE_API_KEY
           OPENAI_API_KEY=$OPENAI_API_KEY
@@ -87,15 +98,30 @@ jobs:
           LANGCHAIN_ENDPOINT=$LANGSMITH_ENDPOINT
           LANGCHAIN_API_KEY=$LANGSMITH_API_KEY
           LANGCHAIN_PROJECT=$LANGSMITH_PROJECT
+          DB_NAME=$DB_NAME
+          DB_USER=$DB_USER
+          DB_PASSWORD=$DB_PASSWORD
+          BACKEND_BASE_URL=$BACKEND_BASE_URL
+          INTERNAL_MATCHING_API_KEY=$INTERNAL_MATCHING_API_KEY
           EOF
 
           scp -i ~/.ssh/ec2_key -P "$EC2_PORT" .env.production "$EC2_USERNAME@$EC2_HOST:$DEPLOY_PATH/.env"
 
       - name: Restart Docker Compose services
         run: |
+          DEPLOY_PATH="${DEPLOY_PATH:-/home/${EC2_USERNAME}/apps/AI}"
           ssh -i ~/.ssh/ec2_key -p "$EC2_PORT" "$EC2_USERNAME@$EC2_HOST" "
             cd '$DEPLOY_PATH' &&
+            docker network inspect backend_internal >/dev/null 2>&1 &&
             docker compose down &&
             docker compose up -d --build &&
-            docker image prune -f
+            for attempt in \$(seq 1 30); do
+              if docker inspect --format='{{.State.Health.Status}}' ai-server 2>/dev/null | grep -q '^healthy$'; then
+                docker image prune -f
+                exit 0
+              fi
+              sleep 5
+            done
+            docker compose logs --tail=200 ai-server
+            exit 1
           "
