@@ -4,6 +4,7 @@ services:
     build: .
     container_name: ai-server
     restart: unless-stopped
+    init: true
     ports:
       - "${AI_BIND_ADDRESS:-127.0.0.1}:${AI_PORT:-8000}:8000"
     networks:
@@ -33,6 +34,13 @@ services:
       # AI 서버가 배치 완료를 전달할 백엔드 주소와 서버 간 인증키입니다.
       BACKEND_BASE_URL: ${BACKEND_BASE_URL:-http://host.docker.internal:8080}
       INTERNAL_MATCHING_API_KEY: ${INTERNAL_MATCHING_API_KEY:?INTERNAL_MATCHING_API_KEY is required}
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    volumes:
+      - ai_runtime_data:/app/data/student_analysis_data
+    security_opt:
+      - no-new-privileges:true
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
@@ -51,3 +59,6 @@ networks:
   backend_internal:
     external: true
     name: backend_internal
+
+volumes:
+  ai_runtime_data:

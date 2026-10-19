@@ -3764,10 +3764,10 @@ def create_regeneration_seed_teams(
                     if (member.get("role_group") or get_role_group(member.get("role"))) == role_group
                 )
                 return (
+                    same_role if constraints.get("distribute_roles") else 0,
                     same_source,
                     same_class if constraints.get("spread_class_or_number") else 0,
                     same_number if constraints.get("spread_class_or_number") else 0,
-                    same_role if constraints.get("distribute_roles") else 0,
                     round(target["score"], 2),
                     len(target["members"]),
                     index,

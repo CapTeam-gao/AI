@@ -115,8 +115,9 @@ jobs:
           ssh -i ~/.ssh/ec2_key -p "$EC2_PORT" "$EC2_USERNAME@$EC2_HOST" "
             cd '$DEPLOY_PATH' &&
             docker network inspect backend_internal >/dev/null 2>&1 &&
-            docker compose down &&
-            docker compose up -d --build &&
+            docker compose config --quiet &&
+            docker compose build ai-server &&
+            docker compose up -d --no-build --remove-orphans ai-server &&
             for attempt in \$(seq 1 30); do
               if docker inspect --format='{{.State.Health.Status}}' ai-server 2>/dev/null | grep -q '^healthy$'; then
                 docker image prune -f
